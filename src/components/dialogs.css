@@ -325,6 +325,72 @@
   padding: 22px 28px 24px;
   width: min(490px, calc(100vw - 32px));
 }
+.google-accounts .button-row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.google-account-list {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+.google-account-row {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: 12px;
+}
+.google-account-row > span,
+.google-account-row > small {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.schedule-fields,
+.recurrence-controls {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.schedule-fields:disabled,
+.recurrence-controls:disabled {
+  opacity: 0.65;
+}
+.recurrence-controls {
+  margin: 10px 0 18px 40px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.recurrence-controls label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.recurrence-controls input,
+.recurrence-controls select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px;
+}
+.recurrence-controls input[type='number'] {
+  width: 80px;
+}
+.recurrence-weekdays {
+  flex-basis: 100%;
+  display: flex;
+  gap: 8px;
+}
+.recurrence-weekdays label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
 .settings-title {
   margin: 0;
   font-size: 23px;

@@ -17,6 +17,10 @@ test-results/
 *.pem
 *.p12
 *.p8
+client_secret*.json
+google-desktop-client.json
+google-client.json
+google-cache.sqlite3*
 
 # Editor and operating-system files
 .DS_Store

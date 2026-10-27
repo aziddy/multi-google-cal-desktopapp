@@ -9,6 +9,7 @@ import {
   monthDays,
   moveEvent,
   resizeEvent,
+  canChangeEvent,
   startOfWeek,
   timedSegments,
   todayDate,
@@ -89,7 +90,7 @@ function TimeView({
     mode: 'move' | 'resize',
     segmentDate: string,
   ) {
-    if (pointer.button !== 0) return
+    if (pointer.button !== 0 || !canChangeEvent(event, 'edit')) return
     pointer.stopPropagation()
     gestureCleanup.current?.()
     const origin = { x: pointer.clientX, y: pointer.clientY }
@@ -329,7 +330,7 @@ function TimeView({
                     {height > 65 && event.location && (
                       <span className="event-location">{event.location}</span>
                     )}
-                    {isTerminal && (
+                    {isTerminal && canChangeEvent(event, 'edit') && (
                       <span
                         role="slider"
                         tabIndex={0}

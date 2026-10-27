@@ -2,7 +2,15 @@ import { useId, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Temporal } from '@js-temporal/polyfill'
 import { AlignLeft, CalendarDays, Clock3, MapPin, Trash2, X } from 'lucide-react'
-import type { Calendar, CalendarEvent, EventInput } from '../domain/types'
+import type {
+  Calendar,
+  CalendarEvent,
+  EventInput,
+  MutationOptions,
+  MutationScope,
+} from '../domain/types'
+import { buildRecurrence, parseRecurrence } from '../domain/recurrence'
+import { RecurrenceControls } from './RecurrenceControls'
 import { dateTimeFields, resolveTimedEventRange } from './eventEditorTime'
 import './dialogs.css'
 
@@ -11,11 +19,12 @@ interface EventEditorProps {
   initialDate: string
   initialMinute?: number
   initialAllDay?: boolean
+  scope?: MutationScope
   calendars: Calendar[]
   timeZone: string
   onClose: () => void
-  onSave: (input: EventInput, id?: string) => Promise<void>
-  onDelete: (event: CalendarEvent) => Promise<void>
+  onSave: (input: EventInput, id?: string, options?: MutationOptions) => Promise<void>
+  onDelete: (event: CalendarEvent, scope?: MutationScope) => Promise<void>
 }
 
 function initialFields(props: EventEditorProps) {
@@ -55,7 +64,18 @@ export function EventEditor(props: EventEditorProps) {
   const { event, calendars, onClose, onSave, onDelete } = props
   const formId = useId()
   const [title, setTitle] = useState(event?.title ?? '')
-  const [calendarId, setCalendarId] = useState(event?.calendarId ?? calendars[0]?.id ?? '')
+  const [calendarId, setCalendarId] = useState(
+    event?.calendarId ??
+      calendars.find(
+        (calendar) =>
+          calendar.primary && (calendar.accessRole === 'writer' || calendar.accessRole === 'owner'),
+      )?.id ??
+      calendars.find(
+        (calendar) =>
+          !calendar.provider || calendar.accessRole === 'writer' || calendar.accessRole === 'owner',
+      )?.id ??
+      '',
+  )
   const [allDay, setAllDay] = useState(event?.allDay ?? props.initialAllDay ?? false)
   const [fields, setFields] = useState(() => initialFields(props))
   const [timeZone, setTimeZone] = useState(event?.timeZone ?? props.timeZone)
@@ -64,6 +84,18 @@ export function EventEditor(props: EventEditorProps) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [requestId] = useState(() => crypto.randomUUID())
+  const [rule, setRule] = useState(() =>
+    parseRecurrence(
+      event?.recurrence,
+      initialFields(props).startDate,
+      event?.timeZone ?? props.timeZone,
+    ),
+  )
+  const [ruleChanged, setRuleChanged] = useState(false)
+  const scheduleLocked =
+    event?.provider === 'google' &&
+    (event.seriesScheduleEditable === false || (props.scope === 'series' && rule === null))
   const calendar = calendars.find((item) => item.id === calendarId)
   const setField = (field: keyof typeof fields, value: string) =>
     setFields((current) => ({ ...current, [field]: value }))
@@ -105,8 +137,20 @@ export function EventEditor(props: EventEditorProps) {
         end,
         allDay,
         timeZone,
-        location: location.trim() || undefined,
-        description: description.trim() || undefined,
+        location:
+          event && location === (event.location ?? '')
+            ? event.location
+            : location.trim() || undefined,
+        description:
+          event && description === (event.description ?? '')
+            ? event.description
+            : description.trim() || undefined,
+        ...(calendar.provider === 'google' &&
+        !event?.recurringEventId &&
+        (ruleChanged || (event && fields.startDate !== initialFields(props).startDate)) &&
+        rule
+          ? { recurrence: buildRecurrence(rule, fields.startDate, allDay, timeZone) }
+          : {}),
       }
     } catch (cause) {
       setError(
@@ -118,7 +162,7 @@ export function EventEditor(props: EventEditorProps) {
     }
     setPending(true)
     try {
-      await onSave(input, event?.id)
+      await onSave(input, event?.id, { event, scope: props.scope ?? 'occurrence', requestId })
       onClose()
     } catch (cause) {
       setError(errorMessage(cause))
@@ -131,7 +175,7 @@ export function EventEditor(props: EventEditorProps) {
     setPending(true)
     setError('')
     try {
-      await onDelete(event)
+      await onDelete(event, props.scope)
       onClose()
     } catch (cause) {
       setError(errorMessage(cause))
@@ -173,7 +217,7 @@ export function EventEditor(props: EventEditorProps) {
           </div>
           <Dialog.Title className="sr-only">{event ? 'Edit event' : 'Create event'}</Dialog.Title>
           <Dialog.Description className="sr-only">
-            Save an event to one of your local demo calendars.
+            Save an event to a writable calendar.
           </Dialog.Description>
           <form
             id={formId}
@@ -203,93 +247,120 @@ export function EventEditor(props: EventEditorProps) {
                 />
                 Event
               </div>
-              <div className="editor-row">
-                <Clock3 size={20} className="editor-row-icon" />
-                <div className="editor-row-content">
-                  <div className="date-time-row">
-                    <label className="editor-field">
-                      <span>Start date</span>
-                      <input
-                        aria-label="Start date"
-                        type="date"
-                        required
-                        value={fields.startDate}
-                        onChange={(e) => setField('startDate', e.target.value)}
-                      />
-                    </label>
-                    {!allDay && (
-                      <label className="editor-field editor-time">
-                        <span>Start time</span>
+              {event?.provider === 'google' && (
+                <p className="settings-help">
+                  {props.scope === 'series'
+                    ? 'Editing the whole series from its original anchor.'
+                    : event.recurringEventId
+                      ? 'Editing this occurrence only.'
+                      : 'Editing a Google Calendar event.'}
+                </p>
+              )}
+              {scheduleLocked && (
+                <p className="settings-help">
+                  {event?.seriesScheduleReason ??
+                    'This schedule must be changed in Google Calendar.'}
+                </p>
+              )}
+              <fieldset className="schedule-fields" disabled={scheduleLocked}>
+                <div className="editor-row">
+                  <Clock3 size={20} className="editor-row-icon" />
+                  <div className="editor-row-content">
+                    <div className="date-time-row">
+                      <label className="editor-field">
+                        <span>Start date</span>
                         <input
-                          aria-label="Start time"
-                          type="time"
+                          aria-label="Start date"
+                          type="date"
                           required
-                          step={900}
-                          value={fields.startTime}
-                          onChange={(e) => setField('startTime', e.target.value)}
+                          value={fields.startDate}
+                          onChange={(e) => setField('startDate', e.target.value)}
                         />
                       </label>
-                    )}
-                  </div>
-                  <div className="date-time-row">
-                    <label className="editor-field">
-                      <span>End date{allDay ? ' (inclusive)' : ''}</span>
-                      <input
-                        aria-label="End date"
-                        type="date"
-                        required
-                        min={fields.startDate}
-                        value={fields.endDate}
-                        onChange={(e) => setField('endDate', e.target.value)}
-                      />
-                    </label>
-                    {!allDay && (
-                      <label className="editor-field editor-time">
-                        <span>End time</span>
+                      {!allDay && (
+                        <label className="editor-field editor-time">
+                          <span>Start time</span>
+                          <input
+                            aria-label="Start time"
+                            type="time"
+                            required
+                            step={900}
+                            value={fields.startTime}
+                            onChange={(e) => setField('startTime', e.target.value)}
+                          />
+                        </label>
+                      )}
+                    </div>
+                    <div className="date-time-row">
+                      <label className="editor-field">
+                        <span>End date{allDay ? ' (inclusive)' : ''}</span>
                         <input
-                          aria-label="End time"
-                          type="time"
+                          aria-label="End date"
+                          type="date"
                           required
-                          step={900}
-                          value={fields.endTime}
-                          onChange={(e) => setField('endTime', e.target.value)}
+                          min={fields.startDate}
+                          value={fields.endDate}
+                          onChange={(e) => setField('endDate', e.target.value)}
                         />
                       </label>
-                    )}
-                  </div>
-                  <div className="all-day-row">
-                    <label className="dialog-check">
-                      <input
-                        type="checkbox"
-                        checked={allDay}
-                        onChange={(e) => setAllDay(e.target.checked)}
-                      />
-                      <span>All day</span>
-                    </label>
-                    {!allDay && (
-                      <label className="timezone-field">
-                        <span className="sr-only">Event time zone</span>
+                      {!allDay && (
+                        <label className="editor-field editor-time">
+                          <span>End time</span>
+                          <input
+                            aria-label="End time"
+                            type="time"
+                            required
+                            step={900}
+                            value={fields.endTime}
+                            onChange={(e) => setField('endTime', e.target.value)}
+                          />
+                        </label>
+                      )}
+                    </div>
+                    <div className="all-day-row">
+                      <label className="dialog-check">
                         <input
-                          aria-label="Event time zone"
-                          value={timeZone}
-                          onChange={(e) => setTimeZone(e.target.value)}
-                          placeholder="America/Chicago"
-                          list={`${formId}-zones`}
+                          type="checkbox"
+                          checked={allDay}
+                          onChange={(e) => setAllDay(e.target.checked)}
                         />
+                        <span>All day</span>
                       </label>
-                    )}
+                      {!allDay && (
+                        <label className="timezone-field">
+                          <span className="sr-only">Event time zone</span>
+                          <input
+                            aria-label="Event time zone"
+                            value={timeZone}
+                            onChange={(e) => setTimeZone(e.target.value)}
+                            placeholder="America/Chicago"
+                            list={`${formId}-zones`}
+                          />
+                        </label>
+                      )}
+                    </div>
+                    <datalist id={`${formId}-zones`}>
+                      <option value="America/Chicago" />
+                      <option value="America/New_York" />
+                      <option value="America/Los_Angeles" />
+                      <option value="Europe/London" />
+                      <option value="Europe/Paris" />
+                      <option value="Asia/Tokyo" />
+                      <option value="UTC" />
+                    </datalist>
                   </div>
-                  <datalist id={`${formId}-zones`}>
-                    <option value="America/Chicago" />
-                    <option value="America/New_York" />
-                    <option value="America/Los_Angeles" />
-                    <option value="Europe/London" />
-                    <option value="Europe/Paris" />
-                    <option value="Asia/Tokyo" />
-                    <option value="UTC" />
-                  </datalist>
                 </div>
-              </div>
+              </fieldset>
+              {calendar?.provider === 'google' && !event?.recurringEventId && (
+                <RecurrenceControls
+                  rule={rule}
+                  disabled={scheduleLocked}
+                  onChange={(value) => {
+                    setRule(value)
+                    setRuleChanged(true)
+                  }}
+                />
+              )}
               <div className="editor-row">
                 <CalendarDays size={20} className="editor-row-icon" />
                 <label className="editor-row-content editor-field">
@@ -297,15 +368,26 @@ export function EventEditor(props: EventEditorProps) {
                   <span className="calendar-select-wrap">
                     <span className="calendar-select-dot" style={{ background: calendar?.color }} />
                     <select
+                      disabled={event?.provider === 'google'}
                       aria-label="Calendar"
                       value={calendarId}
                       onChange={(e) => setCalendarId(e.target.value)}
                     >
-                      {calendars.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
+                      {calendars
+                        .filter(
+                          (item) =>
+                            !item.provider ||
+                            item.accessRole === 'writer' ||
+                            item.accessRole === 'owner',
+                        )
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                            {item.accountEmail && item.name !== item.accountEmail
+                              ? ` · ${item.accountEmail}`
+                              : ''}
+                          </option>
+                        ))}
                     </select>
                   </span>
                 </label>

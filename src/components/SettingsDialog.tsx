@@ -3,6 +3,8 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { CalendarDays, Check, Monitor, Moon, RotateCcw, Sun, X } from 'lucide-react'
 import type { Theme } from '../domain/types'
 import './dialogs.css'
+import { dataSource } from '../data/repository'
+import { GoogleAccounts } from './GoogleAccounts'
 
 interface SettingsDialogProps {
   theme: Theme
@@ -132,52 +134,59 @@ export function SettingsDialog({
               Timed events adjust to this zone. All-day events keep their dates.
             </p>
           </section>
-          <section className="settings-demo-card">
-            <div className="settings-demo-icon">
-              <CalendarDays size={23} />
-            </div>
-            <div>
-              <h3>Your calendars, one place.</h3>
-              <p>This preview uses sample accounts. Google sign-in is coming next.</p>
-              <span className="settings-demo-badge">LOCAL DEMO</span>
-            </div>
-          </section>
-          <section className="settings-section settings-reset-section">
-            <div>
-              <h3>Start fresh</h3>
-              <p className="settings-help">
-                Restore sample events around today. Your local edits will be replaced.
-              </p>
-            </div>
-            {confirmReset ? (
-              <div className="reset-confirmation">
-                <span>Replace your demo events?</span>
-                <div>
-                  <button
-                    className="dialog-text-button"
-                    disabled={pending}
-                    onClick={() => setConfirmReset(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="dialog-danger-button"
-                    disabled={pending}
-                    onClick={() => {
-                      void reset()
-                    }}
-                  >
-                    {pending ? 'Resetting…' : 'Reset demo'}
-                  </button>
-                </div>
+          {dataSource === 'google' && <GoogleAccounts />}
+          {dataSource === 'demo' && (
+            <section className="settings-demo-card">
+              <div className="settings-demo-icon">
+                <CalendarDays size={23} />
               </div>
-            ) : (
-              <button className="settings-reset-button" onClick={() => setConfirmReset(true)}>
-                <RotateCcw size={16} />
-                Reset demo data
-              </button>
-            )}
-          </section>
+              <div>
+                <h3>Your calendars, one place.</h3>
+                <p>
+                  Browser preview uses sample accounts. Connect Google accounts in the desktop app.
+                </p>
+                <span className="settings-demo-badge">LOCAL DEMO</span>
+              </div>
+            </section>
+          )}
+          {dataSource === 'demo' && (
+            <section className="settings-section settings-reset-section">
+              <div>
+                <h3>Start fresh</h3>
+                <p className="settings-help">
+                  Restore sample events around today. Your local edits will be replaced.
+                </p>
+              </div>
+              {confirmReset ? (
+                <div className="reset-confirmation">
+                  <span>Replace your demo events?</span>
+                  <div>
+                    <button
+                      className="dialog-text-button"
+                      disabled={pending}
+                      onClick={() => setConfirmReset(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="dialog-danger-button"
+                      disabled={pending}
+                      onClick={() => {
+                        void reset()
+                      }}
+                    >
+                      {pending ? 'Resetting…' : 'Reset demo'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button className="settings-reset-button" onClick={() => setConfirmReset(true)}>
+                  <RotateCcw size={16} />
+                  Reset demo data
+                </button>
+              )}
+            </section>
+          )}
           {error && (
             <p className="dialog-error" role="alert">
               {error}

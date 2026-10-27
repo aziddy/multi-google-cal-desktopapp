@@ -2,6 +2,7 @@ import { Temporal } from '@js-temporal/polyfill'
 import { isTauri } from '@tauri-apps/api/core'
 import type { CalendarRepository, CalendarEvent, EventInput, DateRange } from '../domain/types'
 import { createDemoSnapshot, type CalendarSnapshot } from './fixtures'
+import { googleRepository } from './googleRepository'
 
 const STORAGE_KEY = 'calendar-demo-v1'
 
@@ -248,16 +249,12 @@ function validateSnapshot(value: unknown): CalendarSnapshot {
 
 function overlaps(event: CalendarEvent, range?: DateRange): boolean {
   if (!range) return true
-  if (event.allDay)
-    return event.start < range.end.slice(0, 10) && event.end > range.start.slice(0, 10)
-  const zone = event.timeZone
+  if (event.allDay) return event.start < range.endDate && event.end > range.startDate
   const boundary = (date: string) =>
-    /^\d{4}-\d{2}-\d{2}$/.test(date)
-      ? Temporal.PlainDate.from(date).toZonedDateTime(zone).toInstant()
-      : Temporal.Instant.from(date)
+    Temporal.PlainDate.from(date).toZonedDateTime(range.timeZone).toInstant()
   return (
-    Temporal.Instant.compare(Temporal.Instant.from(event.start), boundary(range.end)) < 0 &&
-    Temporal.Instant.compare(Temporal.Instant.from(event.end), boundary(range.start)) > 0
+    Temporal.Instant.compare(Temporal.Instant.from(event.start), boundary(range.endDate)) < 0 &&
+    Temporal.Instant.compare(Temporal.Instant.from(event.end), boundary(range.startDate)) > 0
   )
 }
 
@@ -369,4 +366,7 @@ export function createRepository(
   }
 }
 
-export const repository = createRepository()
+export const demoRepository = createRepository()
+export const dataSource = isTauri() ? 'google' : 'demo'
+export const repository: CalendarRepository =
+  dataSource === 'google' ? googleRepository : demoRepository

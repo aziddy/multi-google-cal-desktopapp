@@ -3,6 +3,7 @@ import { Temporal } from '@js-temporal/polyfill'
 import {
   addDays,
   addMonths,
+  canChangeEvent,
   eventDates,
   formatDate,
   monthDays,
@@ -10,6 +11,8 @@ import {
   resizeEvent,
   startOfWeek,
   timedSegments,
+  utcMonthBuckets,
+  viewRange,
 } from './calendar'
 import type { CalendarEvent } from './types'
 
@@ -27,6 +30,40 @@ const event = (overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
 })
 
 describe('date navigation', () => {
+  it('requires explicit capabilities for Google events', () => {
+    expect(canChangeEvent(event(), 'edit')).toBe(true)
+    expect(canChangeEvent(event({ provider: 'google' }), 'edit')).toBe(false)
+    expect(
+      canChangeEvent(
+        event({ provider: 'google', capabilities: { edit: true, delete: false } }),
+        'edit',
+      ),
+    ).toBe(true)
+    expect(
+      canChangeEvent(
+        event({ provider: 'google', capabilities: { edit: true, delete: false } }),
+        'delete',
+      ),
+    ).toBe(false)
+  })
+  it('covers the full visible range and the UTC months needed for all-day and timed events', () => {
+    expect(viewRange('2026-10-26', 'month', zone)).toEqual({
+      startDate: '2026-09-27',
+      endDate: '2026-11-08',
+      timeZone: zone,
+    })
+    expect(viewRange('2026-10-26', 'schedule', zone).endDate).toBe('2026-11-25')
+    expect(
+      utcMonthBuckets({
+        startDate: '2026-03-01',
+        endDate: '2026-03-02',
+        timeZone: 'Pacific/Kiritimati',
+      }).map((b) => b.startDate),
+    ).toEqual(['2026-02-01', '2026-03-01'])
+    expect(
+      utcMonthBuckets({ startDate: '2026-03-08', endDate: '2026-03-09', timeZone: zone }),
+    ).toEqual([{ startDate: '2026-03-01', endDate: '2026-04-01', timeZone: 'UTC' }])
+  })
   it('clamps month navigation and handles leap years', () => {
     expect(addMonths('2026-01-31', 1)).toBe('2026-02-28')
     expect(addMonths('2024-01-31', 1)).toBe('2024-02-29')

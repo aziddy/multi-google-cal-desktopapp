@@ -2,108 +2,124 @@
 
 All your calendars, one clear view.
 
-An open-source desktop calendar built with **Tauri 2, React, TypeScript, and Vite**, using **Zustand** for interface preferences and **TanStack Query** for calendar data. The interface takes its cues from Google Calendar: a familiar sidebar, colored calendars, and a clean schedule grid. macOS is the primary desktop target; the native shell also supports Windows and Linux.
+An open-source desktop calendar built with **Tauri 2, Rust, React, TypeScript, and Vite**. Connect multiple Google accounts using your own Desktop OAuth client, view downloaded events offline, and edit eligible events in either Multi Calendar or Google Calendar.
 
-**Current status: local demo.** The app ships with fictional accounts, calendars, and events so the interface works immediately. It does not sign in to Google, read your calendars, or send invitations. Changes affect the sample data stored on your device.
+macOS is the primary desktop target. Windows and Linux credential-store integrations are included, but need testing on those operating systems. Browser development uses independent fictional demo data.
 
-![Multi Calendar week view showing calendars from two fictional accounts](docs/preview.png)
-
-## What you can try
-
-- View multiple sample accounts and calendars together; toggle individual calendars.
-- Switch between day, week, month, and schedule views.
-- Create, edit, and delete local events, including all-day events.
-- Search events and change display preferences.
-- Keep local data between launches, with a reset option to restore the demo.
-
-The calendar UI is implemented in React. It does not embed or scrape the Google Calendar website. Google account connectivity is a separate future integration.
+![Multi Calendar week view with fictional demo data](docs/preview.png)
 
 ## Get started
 
-Use **Node.js 22 LTS (22.22.2 or later)** and **pnpm 10**. The exact pnpm version is recorded in `package.json`.
+Install **Node.js 22.22.2 or later**, **pnpm 10**, **Rust 1.90 or later**, and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). On macOS, install Xcode Command Line Tools.
 
 ```sh
 corepack enable
 pnpm install
-pnpm dev
-```
-
-Open **http://127.0.0.1:1420**. Browser preview uses browser storage for the local demo and needs no Rust toolchain, OAuth credentials, or Google Cloud project.
-
-### Run the desktop app
-
-Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/) and the current stable [Rust toolchain](https://rustup.rs/) (Rust 1.90 or later). On macOS, install Xcode Command Line Tools with `xcode-select --install`.
-
-```sh
 pnpm tauri dev
 ```
 
-Tauri starts Vite automatically. The desktop app stores sample calendar data through the native store plugin in its application data directory. Browser preview and the desktop app use separate stores.
+Open Settings, import a Google Desktop OAuth client JSON, then choose **Connect another Google account**. Sign-in opens your system browser. The app uses authorization code flow with PKCE S256, random state, and a temporary random-port listener bound only to `127.0.0.1`. Sign-in can be cancelled and expires after five minutes.
 
-To run the desktop app with built web assets and no Vite server on macOS or Linux:
+If you already saved a client at `~/.config/multi-calendar/google-desktop-client.json`, **Use saved client** imports it. This path is optional; the file picker accepts a downloaded client from any location. Each self-builder supplies their own client. Disconnect every account before replacing the client configuration.
+
+### Google Cloud setup
+
+1. Create or select a [Google Cloud project](https://console.cloud.google.com/).
+2. Enable **Google Calendar API** in APIs & Services.
+3. Configure Google Auth Platform branding with an app name, support email, and contact email. For personal development, choose **External** audience and leave publishing status at **Testing**.
+4. Add every Google account you intend to connect under **Audience → Test users**, including Workspace accounts. Workspace administrators may also restrict third-party OAuth access.
+5. In **Data Access**, add these scopes:
+
+   - `openid`
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/userinfo.profile`
+   - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
+   - `https://www.googleapis.com/auth/calendar.events`
+
+6. Create an OAuth client with application type **Desktop app**, download its JSON, and import it in Settings. A Web client is not accepted. Desktop loopback redirects do not require manually registering a fixed localhost port.
+7. Allow both Calendar permissions during sign-in. Google may show an unverified-app notice for your own testing project.
+
+With External apps in Testing, refresh tokens for these Calendar scopes normally expire after **seven days**. Reconnect when prompted. Moving to production and distributing a shared client can require Google verification, branding URLs, and additional policy work. See [Google's OAuth testing documentation](https://developers.google.com/identity/protocols/oauth2/production-readiness/policy-compliance).
+
+Never commit client JSON, refresh/access tokens, personal calendar exports, or local databases. An installed application's client secret cannot be kept confidential by distributing it with an app; it does not replace PKCE or secure token storage.
+
+### Browser demo
 
 ```sh
-# Build the debug binary and web assets, then launch
-pnpm dev:static:fresh
-
-# Launch the existing debug build again
-pnpm dev:static
-
-# Rebuild without launching
-pnpm dev:static:prepare
+pnpm dev
 ```
 
-Rebuild after changing frontend or Rust code to include those changes in the static app.
+Open `http://127.0.0.1:1420`. Browser preview uses local demo calendars and browser storage. Google OAuth and API requests run exclusively in Rust in the desktop app.
 
-### Build
+## Calendar behavior
+
+- Day, Week, Month (all 42 cells), and 30-day Schedule views download complete UTC month buckets covering the visible dates. All pages are fetched before a bucket is replaced transactionally; copies are deduplicated by account, calendar, and event.
+- Visible calendars refresh every 60 seconds while foregrounded and when focus returns. Use the refresh button for an immediate refresh, including calendar metadata. There is no speculative date prefetch or bounded-query `syncToken` use.
+- Requests are limited to four globally and two per account, with coalescing and backoff. One account's failure does not clear another account's data. The status banner distinguishes missing coverage and failed refreshes from an empty calendar.
+- Search covers **downloaded dates** across visible calendars. It does not query all of Google Calendar. Cached events remain available offline; writes require a connection and are never queued for automatic offline replay.
+- Names, calendar colors, time zones, and permissions come from Google. Calendar visibility is an app-local preference. All-day dates keep their original date boundaries; timed view boundaries use the selected display zone.
+
+### Editing and recurrence
+
+The app permits edits only when it can verify that the calendar is writable and the event is an ordinary, guest-free event organized by that calendar. Guest-bearing meetings, attendee copies, private/redacted/locked resources, and special Google event types are read-only. **Open in Google Calendar** is available in event details. Rust rechecks eligibility before every write.
+
+New events can choose a writable calendar. Existing Google events keep their calendar. Updates send only explicit changed fields; clearing a description or location sends a null. Unchanged descriptions, reminders, conference data, attachments, and other Google metadata are preserved natively. Drag and resize send timing changes for a single occurrence.
+
+Common recurrence controls support daily, weekly with selected weekdays, monthly by date, and yearly by month/date, with intervals and never/count/until endings. Google skips nonexistent monthly/yearly dates rather than clamping them. Timed recurrence preserves an IANA time zone; all-day ends are exclusive.
+
+Select **This occurrence** or **Whole series** in a recurring event's details. Whole-series editing loads the parent's original anchor. Before a whole-series action, the app fetches the complete, paginated, unexpanded family and checks its eligibility. Guest-bearing or unverifiable families remain read-only. Existing exceptions prevent whole-series timing/rule changes; eligible metadata changes and deletion remain available. Complex imported rules are preserved and their schedule controls are disabled.
+
+Updates and deletes use `If-Match` with the expected ETag. If another client changed the event, close the editor and refresh before trying again. Creation attempts use stable Google-compatible IDs. If a response is uncertain, the app persists a recovery receipt and checks Google before a retry. Settings can reconcile previous writes or retry their original attempt after a restart. A confirmed remote write whose cache update failed is reported separately; refreshing does not create another copy.
+
+Calendar-to-calendar moves, RSVP management, offline write queues, and “this and following” are deferred.
+
+## Storage and disconnect
+
+Refresh tokens are stored only in **macOS Keychain**, **Windows credential storage**, or **Linux Secret Service**. Access tokens remain in Rust memory. Tokens are never returned to React, logged, or stored in SQLite/frontend storage. Linux requires a running session D-Bus and an unlocked Secret Service implementation such as GNOME Keyring; builds may require the platform's D-Bus development packages. There is no plaintext token fallback when secure storage fails.
+
+On macOS, credential operations explicitly prohibit authentication UI. A locked Keychain or an access rule tied to a previous ad-hoc build pauses the account instead of opening password dialogs. After unlocking the login Keychain in Keychain Access, use **Retry credential access** in Settings. If a rebuilt app cannot access an old credential, **Reconnect** through Google replaces only that account’s app-owned entry using the current build’s default Keychain access rules. It does not widen access to other apps or change global Keychain security settings. During a run the refresh token is cached only in native memory, and failed refreshes share an account-level backoff. Stable Developer ID signing avoids per-build identity changes. Never enter your macOS password into the calendar app or a chat.
+
+The native application-data directory holds:
+
+- `google-client.json`: the imported Desktop client configuration.
+- `google-cache.sqlite3` and its SQLite sidecars: account/calendar metadata, downloaded event resources, coverage, and mutation recovery receipts. This cache contains personal calendar data and is **not encrypted**; protect your device/user account accordingly.
+- `preferences.json`: theme, display zone, navigation, and local calendar visibility.
+- `calendar-demo.json`: the older independent demo store, preserved separately.
+
+On macOS the directory is `~/Library/Application Support/com.aziddy.multicalendar/`; other platforms use Tauri's application-data directory. Disconnect cancels account work and removes its local credentials, metadata, cached events, and receipts. It does not delete Google events or revoke the Google Cloud project's grant. To revoke the grant explicitly, use your [Google Account connections](https://myaccount.google.com/connections).
+
+## Build and verify
 
 ```sh
-# Production web assets
-pnpm build
-
-# Debug native application without an installer
-pnpm build:debug
-
-# Native application and installer for your current operating system
-pnpm tauri build
-```
-
-Web assets are written to `dist/`; native bundles are written to `src-tauri/target/release/bundle/`. Build installers on their target operating system. Signing, notarization, automatic updates, and public binary distribution are not configured in this initial version.
-
-## Development checks
-
-```sh
+pnpm typecheck
 pnpm lint
 pnpm format:check
-pnpm typecheck
 pnpm test
 pnpm exec playwright install chromium
 pnpm test:e2e
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo check --locked --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib
+pnpm tauri build
 ```
 
-Run these checks locally before submitting changes. Native compilation does not replace testing each platform's desktop interface.
+Unit/native tests cover date boundaries, DST, UTC+14, changed-field preservation, recurrence, OAuth state/PKCE/cancellation, credential failures, token refresh, pagination, transactional replacement, account isolation, disconnect races, conflicts, and uncertain-write recovery. Browser tests use demo data or a mocked native bridge; they do not contact Google or create real events.
 
-## Architecture
+For live verification, use your own client and two explicitly allowed test accounts. Create clearly labeled disposable events, verify create/update/delete and recurring occurrence/series actions, edit a test event in Google Calendar, refresh the desktop app, and remove the test events afterward. Also check cached viewing after a restart and loss of connectivity. Never use someone else's meetings as test data.
 
-- **React + TypeScript:** calendar views, event forms, navigation, and accessible dialogs.
-- **Zustand:** selected date/view, calendar visibility, theme, and display preferences.
-- **TanStack Query:** repository queries, event mutations, and cache updates.
-- **Repository interface:** local demo data today, an integration boundary for Google Calendar later.
-- **Tauri + Rust:** a small native shell, window controls, and persistent local storage.
-- **Temporal:** calendar date arithmetic and explicit handling of timed versus date-only events.
+```sh
+# Build and run built assets without a Vite server
+pnpm dev:static:fresh
+# Launch an existing debug build
+pnpm dev:static
+# Build a debug native binary without bundling
+pnpm build:debug
+```
 
-Accounts and calendar IDs remain attached to events. All-day end dates are exclusive; timed events carry explicit instants and an IANA time zone. Sample accounts and names are fictional.
-
-## Google Calendar integration
-
-Google sign-in and synchronization are **not implemented**. The intended next step is direct Google Calendar API access from the native layer, using the system browser, a Desktop OAuth client, and authorization code flow with PKCE. Account tokens will belong in operating-system secure storage, outside the React webview and this repository.
-
-No credentials are needed for this demo. Do not commit Google tokens, OAuth credentials, signing certificates, or personal calendar exports. A future developer setup will use your own Google Cloud Desktop OAuth client; an installed application must not depend on keeping an embedded client secret confidential. Public OAuth distribution and Google verification will be addressed when that integration is implemented.
-
-This app is independently developed and is not affiliated with or endorsed by Google. Google Calendar is a trademark of Google LLC. The app icon is an original asset; Google logos and proprietary product assets are not bundled.
+Production bundles are written to `src-tauri/target/release/bundle/`. Build and test installers on their target OS. Signing, notarization, automatic updates, and public binary distribution are not configured.
 
 ## License
 
-Copyright © 2026 Alex Zidros. Licensed under **GNU AGPL version 3 only** (`AGPL-3.0-only`); see [LICENSE](LICENSE). This software is provided without warranty. Dependency licenses and asset attribution are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Copyright © 2026 Alex Zidros. Licensed under **GNU AGPL version 3 only** (`AGPL-3.0-only`); see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+This app is independently developed and is not affiliated with or endorsed by Google. Google Calendar is a trademark of Google LLC. No Google logos or proprietary product artwork are bundled.

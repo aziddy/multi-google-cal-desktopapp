@@ -6,6 +6,8 @@ The following inventory and license texts cover the JavaScript production depend
 
 The original application icon in `src-tauri/icons/app-icon.svg` is part of Multi Calendar. No Google logo or proprietary Google Calendar artwork is bundled. Google Calendar is a trademark of Google LLC; no affiliation is implied.
 
+The Google integration adds native OAuth/PKCE, HTTP, OS credential storage, date/time, browser opening, file selection, and SQLite dependencies. The complete locked native inventory is in [docs/NATIVE_DEPENDENCIES.md](docs/NATIVE_DEPENDENCIES.md), and the upstream license files shipped in the downloaded crates are reproduced in [docs/NATIVE_LICENSES.txt](docs/NATIVE_LICENSES.txt). Both files are included in native bundles. Regenerate them with `python3 scripts/update-native-notices.py` after changing Cargo dependencies.
+
 ## JavaScript dependency inventory
 
 | Package | Version | Declared license |

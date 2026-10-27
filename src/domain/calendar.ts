@@ -1,7 +1,12 @@
 import { Temporal } from '@js-temporal/polyfill'
-import type { CalendarEvent, EventInput } from './types'
+import type { CalendarEvent, CalendarView, DateRange, EventInput } from './types'
 
 export const DEFAULT_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+/** Provider events require explicit permission; legacy demo events are locally editable. */
+export function canChangeEvent(event: CalendarEvent, action: 'edit' | 'delete'): boolean {
+  return event.provider === 'google' ? event.capabilities?.[action] === true : true
+}
 
 export interface TimedSegment {
   event: CalendarEvent
@@ -32,6 +37,41 @@ export function monthDays(date: string): string[] {
   const first = Temporal.PlainDate.from(date).with({ day: 1 }).toString()
   const start = startOfWeek(first)
   return Array.from({ length: 42 }, (_, index) => addDays(start, index))
+}
+
+/** The dates displayed by a view, with an exclusive end. */
+export function viewRange(date: string, view: CalendarView, timeZone: string): DateRange {
+  const startDate =
+    view === 'week' ? startOfWeek(date) : view === 'month' ? monthDays(date)[0] : date
+  const days = view === 'day' ? 1 : view === 'week' ? 7 : view === 'month' ? 42 : 30
+  return { startDate, endDate: addDays(startDate, days), timeZone }
+}
+
+/** Complete UTC months covering both timed instants and the original all-day dates. */
+export function utcMonthBuckets(range: DateRange): DateRange[] {
+  const startDate = Temporal.PlainDate.from(range.startDate)
+  const endDate = Temporal.PlainDate.from(range.endDate)
+  if (Temporal.PlainDate.compare(startDate, endDate) >= 0) throw new Error('Invalid date range')
+  const instantStart = startDate.toZonedDateTime(range.timeZone).toInstant()
+  const instantEnd = endDate.toZonedDateTime(range.timeZone).toInstant()
+  const utcStart = instantStart.toZonedDateTimeISO('UTC').toPlainDate()
+  const utcLast = instantEnd.subtract({ nanoseconds: 1 }).toZonedDateTimeISO('UTC').toPlainDate()
+  const first = Temporal.PlainDate.compare(startDate, utcStart) < 0 ? startDate : utcStart
+  const lastDate = endDate.subtract({ days: 1 })
+  const last = Temporal.PlainDate.compare(lastDate, utcLast) > 0 ? lastDate : utcLast
+  const buckets: DateRange[] = []
+  for (
+    let month = first.with({ day: 1 });
+    Temporal.PlainDate.compare(month, last) <= 0;
+    month = month.add({ months: 1 })
+  ) {
+    buckets.push({
+      startDate: month.toString(),
+      endDate: month.add({ months: 1 }).toString(),
+      timeZone: 'UTC',
+    })
+  }
+  return buckets
 }
 
 export function formatDate(

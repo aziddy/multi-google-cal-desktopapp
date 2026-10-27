@@ -213,7 +213,31 @@ describe('calendar repository', () => {
     const disk = memoryStorage(snapshot)
     const repo = createRepository({ ...options, storage: disk.storage })
     expect(
-      (await repo.listEvents({ start: '2026-10-26', end: '2026-10-27' })).map((event) => event.id),
+      (
+        await repo.listEvents({
+          startDate: '2026-10-26',
+          endDate: '2026-10-27',
+          timeZone: 'America/Chicago',
+        })
+      ).map((event) => event.id),
     ).toEqual(['inside', 'all-day'])
+  })
+  it('uses the view zone for timed boundaries and preserves all-day dates at UTC+14', async () => {
+    const snapshot = createDemoSnapshot(options.today, options.timeZone)
+    snapshot.events = [
+      { ...input, id: 'timed', start: '2026-10-25T10:30:00Z', end: '2026-10-25T11:30:00Z' },
+      { ...input, id: 'all-day', start: '2026-10-26', end: '2026-10-27', allDay: true },
+      { ...input, id: 'previous', start: '2026-10-25', end: '2026-10-26', allDay: true },
+    ]
+    const repo = createRepository({ ...options, storage: memoryStorage(snapshot).storage })
+    expect(
+      (
+        await repo.listEvents({
+          startDate: '2026-10-26',
+          endDate: '2026-10-27',
+          timeZone: 'Pacific/Kiritimati',
+        })
+      ).map((event) => event.id),
+    ).toEqual(['timed', 'all-day'])
   })
 })

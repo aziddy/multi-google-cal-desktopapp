@@ -631,6 +631,23 @@ textarea::placeholder {
   flex: 1;
   position: relative;
 }
+.google-sync-banner {
+  position: absolute;
+  bottom: 8px;
+  left: 16px;
+  right: 16px;
+  z-index: 5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 4px;
+  box-shadow: 0 1px 6px #0001;
+  pointer-events: none;
+}
 .time-view {
   display: flex;
   flex-direction: column;

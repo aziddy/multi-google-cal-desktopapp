@@ -2,7 +2,7 @@
   "name": "multi-google-cal-desktopapp",
   "private": true,
   "version": "0.1.0",
-  "description": "Your calendars, one place. A local-first desktop calendar prototype.",
+  "description": "Your calendars, one place. A desktop calendar for multiple Google accounts.",
   "type": "module",
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@10.28.2",

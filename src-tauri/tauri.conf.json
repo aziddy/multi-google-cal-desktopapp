@@ -34,7 +34,7 @@
     "targets": "all",
     "category": "Productivity",
     "shortDescription": "All your calendars, one clear view.",
-    "longDescription": "An open-source desktop calendar with a familiar interface for viewing schedules together. This initial release uses local sample calendars and keeps edits on your device.",
+    "longDescription": "An open-source desktop calendar for multiple Google accounts, with native OAuth, cached viewing, and editing of eligible events and recurring series.",
     "copyright": "Copyright \u00a9 2026 Alex Zidros",
     "icon": [
       "icons/32x32.png",
@@ -45,7 +45,9 @@
     ],
     "resources": {
       "../LICENSE": "LICENSE",
-      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../docs/NATIVE_DEPENDENCIES.md": "docs/NATIVE_DEPENDENCIES.md",
+      "../docs/NATIVE_LICENSES.txt": "docs/NATIVE_LICENSES.txt"
     }
   }
 }

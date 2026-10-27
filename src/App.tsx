@@ -18,6 +18,7 @@ import {
   MapPin,
   Menu,
   Pencil,
+  RefreshCw,
   Plus,
   Search,
   Settings,
@@ -27,16 +28,28 @@ import {
   X,
 } from 'lucide-react'
 import { Temporal } from '@js-temporal/polyfill'
-import { repository } from './data/repository'
+import { repository, dataSource } from './data/repository'
+import { googleRepository } from './data/googleRepository'
+import { useGoogleSync } from './data/useGoogleSync'
 import {
   addDays,
   addMonths,
+  canChangeEvent,
   formatDate,
   monthDays,
   startOfWeek,
   todayDate,
+  viewRange,
 } from './domain/calendar'
-import type { Account, Calendar, CalendarEvent, CalendarView, EventInput } from './domain/types'
+import type {
+  Account,
+  Calendar,
+  CalendarEvent,
+  CalendarView,
+  EventInput,
+  MutationOptions,
+  MutationScope,
+} from './domain/types'
 import { usePreferencePersistence, usePreferences } from './store'
 import { CalendarCanvas } from './components/CalendarCanvas'
 import { eventTime } from './domain/display'
@@ -59,6 +72,7 @@ interface EditorState {
   date: string
   minute?: number
   allDay?: boolean
+  scope?: MutationScope
 }
 
 function App() {
@@ -80,14 +94,17 @@ function App() {
   } = preferences
   const client = useQueryClient()
   const accountsQuery = useQuery({
-    queryKey: ['accounts'],
+    queryKey: [dataSource, 'accounts'],
     queryFn: () => repository.listAccounts(),
   })
   const calendarsQuery = useQuery({
-    queryKey: ['calendars'],
+    queryKey: [dataSource, 'calendars', accountsQuery.data?.map((account) => account.id)],
     queryFn: () => repository.listCalendars(),
   })
-  const eventsQuery = useQuery({ queryKey: ['events'], queryFn: () => repository.listEvents() })
+  const eventsQuery = useQuery({
+    queryKey: [dataSource, 'events', accountsQuery.data?.map((account) => account.id)],
+    queryFn: () => repository.listEvents(),
+  })
   const accounts = accountsQuery.data ?? EMPTY_ACCOUNTS
   const calendars = calendarsQuery.data ?? EMPTY_CALENDARS
   const events = eventsQuery.data ?? EMPTY_EVENTS
@@ -102,6 +119,12 @@ function App() {
   const searchRef = useRef<HTMLInputElement>(null)
   const viewMenuRef = useRef<HTMLDivElement>(null)
   const today = todayDate(timeZone)
+  const google = useGoogleSync(
+    dataSource === 'google',
+    calendars,
+    hiddenCalendarIds,
+    viewRange(date, view, timeZone),
+  )
 
   useEffect(() => {
     document.documentElement.dataset.native = String(isTauri())
@@ -175,27 +198,44 @@ function App() {
   }, [date, timeZone, setDate, setView, editor, selected, settingsOpen, helpOpen])
 
   const saveMutation = useMutation({
-    mutationFn: ({ input, id }: { input: EventInput; id?: string }) =>
-      id ? repository.updateEvent(id, input) : repository.createEvent(input),
+    mutationFn: ({
+      input,
+      id,
+      options,
+    }: {
+      input: EventInput
+      id?: string
+      options?: MutationOptions
+    }) =>
+      id ? repository.updateEvent(id, input, options) : repository.createEvent(input, options),
     onSuccess: async (_, variables) => {
-      await client.invalidateQueries({ queryKey: ['events'] })
+      await client.invalidateQueries({ queryKey: [dataSource] })
+      if (dataSource === 'google') await google.refresh().catch(() => undefined)
       setToast(variables.id ? 'Event updated' : 'Event created')
     },
     onError: (error) => setToast(error.message),
   })
   const deleteMutation = useMutation({
-    mutationFn: (event: CalendarEvent) => repository.deleteEvent(event.id),
+    mutationFn: ({ event, scope }: { event: CalendarEvent; scope: MutationScope }) =>
+      repository.deleteEvent(event.id, { event, scope }),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['events'] })
+      await client.invalidateQueries({ queryKey: [dataSource] })
+      if (dataSource === 'google') await google.refresh().catch(() => undefined)
       setToast('Event deleted')
     },
   })
 
-  async function saveEvent(input: EventInput, id?: string) {
-    await saveMutation.mutateAsync({ input, id })
+  async function saveEvent(input: EventInput, id?: string, options?: MutationOptions) {
+    const current = options?.event ?? (id && events.find((event) => event.id === id))
+    if (id && (!current || !canChangeEvent(current, 'edit')))
+      throw new Error('This event is read-only. Reload it to see the latest permissions.')
+    await saveMutation.mutateAsync({ input, id, options })
   }
-  async function deleteEvent(event: CalendarEvent) {
-    await deleteMutation.mutateAsync(event)
+  async function deleteEvent(event: CalendarEvent, scope: MutationScope = 'occurrence') {
+    if (scope === 'series' && event.provider === 'google' && event.recurringEventId)
+      event = await googleRepository.series(event.id)
+    if (!canChangeEvent(event, 'delete')) throw new Error('This event is read-only.')
+    await deleteMutation.mutateAsync({ event, scope })
   }
   async function resetDemo() {
     await repository.resetDemo()
@@ -268,7 +308,9 @@ function App() {
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search your calendars"
+                placeholder={
+                  dataSource === 'google' ? 'Search downloaded events' : 'Search your calendars'
+                }
                 aria-label="Search events"
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
@@ -378,13 +420,35 @@ function App() {
               )}
             </div>
             <div className="header-separator" />
+            {dataSource === 'google' && (
+              <button
+                className="icon-button"
+                aria-label="Refresh Google calendars"
+                title="Refresh Google calendars"
+                disabled={google.syncing}
+                onClick={() =>
+                  void google
+                    .refresh()
+                    .catch((error: unknown) =>
+                      setToast(error instanceof Error ? error.message : 'Refresh failed'),
+                    )
+                }
+              >
+                <RefreshCw size={20} className={google.syncing ? 'spin' : ''} />
+              </button>
+            )}
             <button
               className="account-avatar"
               aria-label="Manage accounts and settings"
-              title="Alex Morgan · 2 demo accounts"
+              title={
+                accounts.length
+                  ? `${accounts[0].name} · ${accounts.length} ${dataSource} accounts`
+                  : 'Manage accounts'
+              }
               onClick={() => setSettingsOpen(true)}
             >
-              A<span />
+              {accounts[0]?.initials.slice(0, 1) ?? '?'}
+              <span />
             </button>
           </div>
         </div>
@@ -406,6 +470,21 @@ function App() {
           />
         )}
         <main className={`calendar-panel ${searchOpen ? 'search-panel' : ''}`}>
+          {dataSource === 'google' && accounts.length > 0 && (
+            <div className="google-sync-banner" role="status">
+              <span>
+                {google.syncing
+                  ? 'Syncing visible dates…'
+                  : google.failures.length
+                    ? `${google.failures.length} calendar(s) could not refresh. Cached events are shown.`
+                    : google.missing.length
+                      ? 'Some visible dates have not been downloaded completely.'
+                      : 'Visible dates downloaded'}
+                {searchOpen ? ' · Search covers downloaded dates only.' : ''}
+              </span>
+              {!!google.failures.length && <span>{google.failures[0].error}</span>}
+            </div>
+          )}
           {error ? (
             <div className="empty-state error-state">
               <CircleHelp size={40} />
@@ -424,6 +503,15 @@ function App() {
             <div className="loading-state">
               <LoaderCircle size={28} className="spin" />
               <span>Getting your calendars ready…</span>
+            </div>
+          ) : dataSource === 'google' && !accounts.length ? (
+            <div className="empty-state">
+              <CalendarDays size={40} />
+              <h2>Connect your Google calendars</h2>
+              <p>Import your Desktop OAuth client and connect an account to download calendars.</p>
+              <button className="primary-button" onClick={() => setSettingsOpen(true)}>
+                Connect Google account
+              </button>
             </div>
           ) : searchOpen ? (
             <SearchResults
@@ -454,6 +542,7 @@ function App() {
           initialDate={editor.date}
           initialMinute={editor.minute}
           initialAllDay={editor.allDay}
+          scope={editor.scope}
           calendars={calendars}
           timeZone={timeZone}
           onClose={() => setEditor(null)}
@@ -468,12 +557,16 @@ function App() {
           timeZone={timeZone}
           onClose={() => setSelected(null)}
           onDelete={deleteEvent}
-          onEdit={() => {
+          onEdit={async (scope = 'occurrence') => {
+            const event = scope === 'series' ? await googleRepository.series(selected.id) : selected
+            if (!canChangeEvent(event, 'edit'))
+              throw new Error(event.capabilities?.reason ?? 'This series is read-only.')
             setEditor({
-              event: selected,
-              date: selected.allDay
-                ? selected.start
-                : Temporal.Instant.from(selected.start)
+              event,
+              scope,
+              date: event.allDay
+                ? event.start
+                : Temporal.Instant.from(event.start)
                     .toZonedDateTimeISO(timeZone)
                     .toPlainDate()
                     .toString(),
@@ -618,10 +711,10 @@ function Sidebar({
                   className="sidebar-avatar"
                   style={{ background: `${account.color}18`, color: account.color }}
                 >
-                  {account.name.includes('Work') || account.email.includes('studio') ? 'W' : 'A'}
+                  {account.initials.slice(0, 1)}
                 </span>
                 <span>
-                  <strong>{account.email.includes('studio') ? 'Work' : 'Personal'}</strong>
+                  <strong>{account.name}</strong>
                   <small>{account.email}</small>
                 </span>
                 <ChevronDown
@@ -664,14 +757,16 @@ function Sidebar({
       <div className="sidebar-footer">
         <div className={`demo-label ${preferenceError ? 'has-error' : ''}`}>
           <span />
-          LOCAL PREVIEW
+          {dataSource === 'google' ? 'GOOGLE CALENDAR' : 'LOCAL PREVIEW'}
         </div>
         <p>
           {saving
             ? 'Saving your changes…'
             : preferenceError
               ? 'Preferences haven’t been saved'
-              : 'All changes saved on this device'}
+              : dataSource === 'google'
+                ? 'Cached viewing · online editing'
+                : 'All changes saved on this device'}
         </p>
         <span className="footer-brand">
           Multi Calendar <span>v0.1</span>
@@ -693,16 +788,48 @@ function EventPreview({
   calendar?: Calendar
   timeZone: string
   onClose: () => void
-  onEdit: () => void
-  onDelete: (event: CalendarEvent) => Promise<void>
+  onEdit: (scope?: MutationScope) => Promise<void>
+  onDelete: (event: CalendarEvent, scope?: MutationScope) => Promise<void>
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
+  const [scope, setScope] = useState<MutationScope>('occurrence')
+  const [seriesEvent, setSeriesEvent] = useState<CalendarEvent | null>(null)
+  const actionEvent = scope === 'series' ? (seriesEvent ?? event) : event
+  async function chooseScope(next: MutationScope) {
+    setScope(next)
+    setConfirmDelete(false)
+    setError('')
+    if (next !== 'series') return
+    setPending(true)
+    try {
+      setSeriesEvent(await googleRepository.series(event.id))
+    } catch (cause) {
+      const reason =
+        cause instanceof Error ? cause.message : 'The whole series could not be verified.'
+      setError(reason)
+      setSeriesEvent({ ...event, capabilities: { edit: false, delete: false, reason } })
+    } finally {
+      setPending(false)
+    }
+  }
+  const recurring =
+    event.provider === 'google' && (event.recurringEventId || event.recurrence?.length)
+  async function edit() {
+    setPending(true)
+    setError('')
+    try {
+      await onEdit(scope)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load this series.')
+      setPending(false)
+    }
+  }
   async function remove() {
     setPending(true)
     try {
-      await onDelete(event)
+      await onDelete(actionEvent, scope)
       onClose()
     } catch (cause) {
       setError(
@@ -737,22 +864,26 @@ function EventPreview({
           }}
         >
           <div className="preview-toolbar">
-            <button
-              className="icon-button"
-              aria-label="Edit event"
-              disabled={pending}
-              onClick={onEdit}
-            >
-              <Pencil size={19} />
-            </button>
-            <button
-              className="icon-button"
-              aria-label="Delete event"
-              disabled={pending}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 size={19} />
-            </button>
+            {canChangeEvent(actionEvent, 'edit') && (
+              <button
+                className="icon-button"
+                aria-label="Edit event"
+                disabled={pending}
+                onClick={() => void edit()}
+              >
+                <Pencil size={19} />
+              </button>
+            )}
+            {canChangeEvent(actionEvent, 'delete') && (
+              <button
+                className="icon-button"
+                aria-label="Delete event"
+                disabled={pending}
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 size={19} />
+              </button>
+            )}
             <Dialog.Close
               className="icon-button"
               aria-label="Close event details"
@@ -765,6 +896,38 @@ function EventPreview({
             <span style={{ background: calendar?.color ?? '#1a73e8' }} />
             <Dialog.Title>{event.title}</Dialog.Title>
           </div>
+          {recurring && (
+            <label className="preview-row">
+              Apply actions to
+              <select
+                aria-label="Recurring event scope"
+                value={scope}
+                onChange={(e) => void chooseScope(e.target.value as MutationScope)}
+                disabled={pending}
+              >
+                <option value="occurrence">This occurrence</option>
+                <option value="series">Whole series</option>
+              </select>
+            </label>
+          )}
+          {event.provider === 'google' && (
+            <div className="preview-row">
+              <button
+                className="dialog-text-button"
+                onClick={() =>
+                  void googleRepository
+                    .openEvent(event.id)
+                    .catch((cause: unknown) =>
+                      setError(
+                        cause instanceof Error ? cause.message : 'Could not open Google Calendar.',
+                      ),
+                    )
+                }
+              >
+                Open in Google Calendar
+              </button>
+            </div>
+          )}
           <Dialog.Description id="preview-description" className="preview-date">
             {formatDate(eventDate, { weekday: 'long', month: 'long', day: 'numeric' })}
             {endDate !== eventDate &&
@@ -795,7 +958,9 @@ function EventPreview({
             <CalendarDays size={19} />
             <span>
               {calendar?.name ?? 'Calendar'}
-              <small>Demo calendar · saved locally</small>
+              <small>
+                {event.provider === 'google' ? 'Google Calendar' : 'Demo calendar · saved locally'}
+              </small>
             </span>
           </div>
           {error && (
@@ -805,7 +970,7 @@ function EventPreview({
           )}
           {confirmDelete && (
             <div className="delete-confirmation">
-              <span>Delete this event?</span>
+              <span>{scope === 'series' ? 'Delete the whole series?' : 'Delete this event?'}</span>
               <button
                 className="dialog-text-button"
                 disabled={pending}
@@ -824,11 +989,15 @@ function EventPreview({
           )}
           <div className="preview-footer">
             <span className="local-dot" />
-            Only on this device
-            <button disabled={pending} onClick={onEdit}>
-              Edit event
-              <ChevronRight size={16} />
-            </button>
+            {event.provider === 'google'
+              ? (actionEvent.capabilities?.reason ?? 'Google Calendar')
+              : 'Only on this device'}
+            {canChangeEvent(actionEvent, 'edit') && (
+              <button disabled={pending} onClick={() => void edit()}>
+                Edit event
+                <ChevronRight size={16} />
+              </button>
+            )}
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -857,7 +1026,7 @@ function SearchResults({
         <p>
           Search event titles, places, and descriptions
           <br />
-          across your visible calendars.
+          across your visible calendars{dataSource === 'google' ? ' over downloaded dates' : ''}.
         </p>
       </div>
     )
@@ -931,8 +1100,9 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
           <div className="help-note">
             <Globe2 size={20} />
             <p>
-              This preview uses fictional accounts. Your edits stay on this device. Google account
-              connection is planned for the next milestone.
+              {dataSource === 'google'
+                ? 'Connect your Google accounts in Settings. Downloaded events remain available offline. Meetings with guests and unsupported event types are read-only.'
+                : 'This preview uses fictional accounts. Your edits stay on this device. Use the desktop app to connect Google accounts.'}
             </p>
           </div>
           <h3>Make yourself at home</h3>
