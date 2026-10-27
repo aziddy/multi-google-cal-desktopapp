@@ -4,9 +4,9 @@ import type { CalendarEvent } from '../src/domain/types'
 
 const account = {
   id: 'google:a',
-  name: 'Alex Zidros',
-  email: 'alex@example.test',
-  initials: 'AZ',
+  name: 'Demo User',
+  email: 'demo@example.test',
+  initials: 'DU',
   color: '#1a73e8',
   provider: 'google' as const,
   connectionStatus: 'connected',
@@ -163,11 +163,11 @@ test('native settings import a client, connect a real account, and disconnect lo
   await dialog.getByRole('button', { name: 'Use saved client' }).click()
   await expect(dialog.getByText('OAuth project: test-project')).toBeVisible()
   await dialog.getByRole('button', { name: 'Connect another Google account' }).click()
-  await expect(dialog.getByText('alex@example.test', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('demo@example.test', { exact: true })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Import OAuth JSON' })).toBeDisabled()
   await dialog.getByRole('button', { name: 'Disconnect', exact: true }).click()
   await dialog.getByRole('button', { name: 'Remove local account' }).click()
-  await expect(dialog.getByText('alex@example.test', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('demo@example.test', { exact: true })).toHaveCount(0)
 })
 test('guest-bearing Google events expose read-only details and downloaded coverage', async ({
   page,
