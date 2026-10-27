@@ -1,0 +1,522 @@
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgb(20 26 36 / 28%);
+  backdrop-filter: blur(3px);
+  animation: dialog-fade-in 140ms ease-out;
+}
+.calendar-dialog {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 101;
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow:
+    0 20px 80px rgb(0 0 0 / 22%),
+    0 4px 12px rgb(0 0 0 / 8%);
+  padding: 18px 24px 20px;
+  animation: dialog-enter 160ms ease-out;
+}
+.calendar-dialog button,
+.calendar-dialog input,
+.calendar-dialog select,
+.calendar-dialog textarea {
+  font: inherit;
+}
+.calendar-dialog button {
+  cursor: pointer;
+}
+.calendar-dialog button:disabled,
+.calendar-dialog fieldset:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.calendar-dialog input,
+.calendar-dialog select,
+.calendar-dialog textarea {
+  color: var(--text);
+}
+.calendar-dialog input:focus-visible,
+.calendar-dialog select:focus-visible,
+.calendar-dialog textarea:focus-visible,
+.calendar-dialog button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+.dialog-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.dialog-eyebrow {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 1.6px;
+}
+.dialog-icon-button {
+  border: 0;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.dialog-icon-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.dialog-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.event-title-input {
+  width: 100%;
+  padding: 6px 0 10px;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 27px !important;
+  font-weight: 450;
+  letter-spacing: -0.7px;
+  outline: none;
+}
+.event-title-input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.event-title-input:focus-visible {
+  outline: none !important;
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 9px;
+}
+.event-type-pill {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  background: var(--hover);
+  border-radius: 8px;
+  padding: 7px 12px;
+  margin: 15px 0 20px;
+  font-size: 12px;
+  font-weight: 550;
+}
+.event-type-dot,
+.calendar-select-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.editor-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 15px;
+}
+.editor-row-icon {
+  color: var(--muted);
+  margin-top: 13px;
+  flex-shrink: 0;
+}
+.editor-row-content {
+  flex: 1;
+  min-width: 0;
+}
+.date-time-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+.editor-field > span:first-child {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 550;
+}
+.editor-field input,
+.editor-field select {
+  width: 100%;
+  border: 1px solid transparent;
+  border-bottom-color: var(--border);
+  border-radius: 6px 6px 0 0;
+  background: var(--surface);
+  padding: 9px 10px;
+  font-size: 13px;
+  min-height: 38px;
+}
+.editor-time {
+  flex: 0 0 117px;
+}
+.all-day-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  margin-top: 13px;
+}
+.dialog-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dialog-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  margin: 0;
+}
+.timezone-field {
+  min-width: 0;
+  max-width: 200px;
+}
+.timezone-field input {
+  width: 100%;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--border);
+  padding: 5px 0;
+  text-align: right;
+}
+.calendar-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  padding-left: 12px;
+}
+.calendar-select-wrap select {
+  background: transparent;
+  border: 0;
+  padding-left: 0;
+}
+.editor-line-input,
+.editor-description {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 13px;
+  padding: 12px 0;
+}
+.editor-line-input::placeholder,
+.editor-description::placeholder {
+  color: var(--muted);
+}
+.editor-description {
+  resize: vertical;
+  min-height: 64px;
+  max-height: 220px;
+  line-height: 1.6;
+}
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 12px;
+}
+.dialog-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dialog-primary-button,
+.dialog-text-button,
+.dialog-danger-button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 13px !important;
+  font-weight: 550;
+  min-height: 38px;
+  transition: background 120ms;
+}
+.dialog-primary-button {
+  background: var(--primary);
+  color: white;
+  min-width: 82px;
+}
+:root[data-theme='dark'] .dialog-primary-button {
+  color: #062e6f;
+}
+:root[data-theme='dark'] .dialog-error {
+  color: #ffb4ab;
+  background: #ffb4ab12;
+}
+.dialog-primary-button:hover {
+  filter: brightness(0.95);
+}
+.dialog-text-button {
+  color: var(--primary);
+  background: transparent;
+}
+.dialog-text-button:hover {
+  background: var(--hover);
+}
+.dialog-danger-button {
+  background: #b3261e;
+  color: #fff;
+}
+.delete-event-button:hover {
+  background: #b3261e12;
+  color: #b3261e;
+}
+.dialog-error {
+  color: #c33e34;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 7px 0;
+  padding: 10px 12px;
+  background: #b3261e0d;
+  border-radius: 8px;
+}
+.delete-confirmation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-radius: 10px;
+  margin-top: 5px;
+}
+.delete-confirmation > span {
+  font-size: 12px;
+  margin-right: auto;
+}
+.delete-confirmation button {
+  padding: 8px 12px;
+}
+.settings-dialog {
+  padding: 22px 28px 24px;
+  width: min(490px, calc(100vw - 32px));
+}
+.settings-title {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+}
+.settings-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 28px;
+}
+.settings-section {
+  margin: 0 0 24px;
+}
+.settings-section h3,
+.settings-label {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 11px;
+  display: block;
+}
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.theme-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+  border-radius: 12px;
+  padding: 18px 12px 14px;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-size: 12px !important;
+}
+.theme-option:hover {
+  background: var(--hover);
+}
+.theme-option.selected {
+  color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.theme-option-check {
+  position: absolute;
+  right: 9px;
+  top: 8px;
+}
+.settings-zone-select {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  width: 100%;
+  padding: 11px 12px;
+  background: var(--surface);
+  font-size: 13px !important;
+}
+.settings-help {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 7px 0 0;
+}
+.settings-demo-card {
+  display: flex;
+  gap: 15px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin: 0 0 25px;
+}
+.settings-demo-icon {
+  color: var(--primary);
+  margin-top: 2px;
+}
+.settings-demo-card h3 {
+  font-size: 14px;
+  font-weight: 550;
+  margin: 0 0 6px;
+}
+.settings-demo-card p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0 0 9px;
+}
+.settings-demo-badge {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 1px;
+  color: var(--primary);
+}
+.settings-reset-section {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.settings-reset-section h3 {
+  margin-bottom: 0;
+}
+.settings-reset-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px !important;
+  align-self: flex-start;
+}
+.settings-reset-button:hover {
+  background: var(--hover);
+}
+.reset-confirmation {
+  background: var(--surface);
+  border-radius: 9px;
+  padding: 12px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.reset-confirmation > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.settings-about {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.settings-version {
+  opacity: 0.7;
+  margin-left: 3px;
+}
+@keyframes dialog-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@media (max-width: 520px) {
+  .calendar-dialog {
+    padding: 15px 18px;
+    border-radius: 17px;
+  }
+  .editor-row {
+    gap: 11px;
+  }
+  .editor-time {
+    flex-basis: 103px;
+  }
+  .date-time-row {
+    gap: 8px;
+  }
+  .event-title-input {
+    font-size: 24px !important;
+  }
+  .settings-demo-card {
+    padding: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dialog-overlay,
+  .calendar-dialog {
+    animation: none;
+  }
+}

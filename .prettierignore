@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+pnpm-lock.yaml
+LICENSE
+THIRD_PARTY_NOTICES.md
+test-results/
+playwright-report/
