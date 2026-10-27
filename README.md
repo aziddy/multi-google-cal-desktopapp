@@ -40,11 +40,29 @@ pnpm tauri dev
 
 Tauri starts Vite automatically. The desktop app stores sample calendar data through the native store plugin in its application data directory. Browser preview and the desktop app use separate stores.
 
+To run the desktop app with built web assets and no Vite server on macOS or Linux:
+
+```sh
+# Build the debug binary and web assets, then launch
+pnpm dev:static:fresh
+
+# Launch the existing debug build again
+pnpm dev:static
+
+# Rebuild without launching
+pnpm dev:static:prepare
+```
+
+Rebuild after changing frontend or Rust code to include those changes in the static app.
+
 ### Build
 
 ```sh
 # Production web assets
 pnpm build
+
+# Debug native application without an installer
+pnpm build:debug
 
 # Native application and installer for your current operating system
 pnpm tauri build
@@ -65,7 +83,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-The GitHub Actions workflow runs frontend checks and Chromium browser tests, plus native compile checks on macOS, Windows, and Linux. Native compilation does not replace testing each platform's desktop interface.
+Run these checks locally before submitting changes. Native compilation does not replace testing each platform's desktop interface.
 
 ## Architecture
 
