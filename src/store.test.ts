@@ -27,6 +27,18 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('persisted display preferences', () => {
+  it('restores 7 days starting on today in the saved display zone', async () => {
+    const { usePreferences } = await hydrateStore({
+      view: '7days',
+      timeZone: 'America/Chicago',
+      date: '2020-01-01',
+    })
+    expect(usePreferences.getState()).toMatchObject({
+      date: '2026-10-26',
+      view: '7days',
+      timeZone: 'America/Chicago',
+    })
+  })
   it('hydrates and resets today in the saved display zone', async () => {
     const { usePreferences } = await hydrateStore({
       timeZone: 'Asia/Tokyo',

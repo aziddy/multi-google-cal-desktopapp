@@ -53,7 +53,8 @@ Open `http://127.0.0.1:1420`. Browser preview uses local demo calendars and brow
 
 ## Calendar behavior
 
-- Day, Week, Month (all 42 cells), and 30-day Schedule views download complete UTC month buckets covering the visible dates. All pages are fetched before a bucket is replaced transactionally; copies are deduplicated by account, calendar, and event.
+- Day, Week, Month (all 42 cells), 30-day Schedule, and rolling 7 days views download complete UTC month buckets covering the visible dates. All pages are fetched before a bucket is replaced transactionally; copies are deduplicated by account, calendar, and event.
+- Choose **7 days** from the view menu or press **X** to show seven consecutive days starting on the selected date. Previous/Next moves by seven days; Today starts the range on today. Week remains Sunday-first. View shortcuts are **D** (Day), **W** (Week), **M** (Month), **A** (Schedule), and **X** (7 days).
 - Visible calendars refresh every 60 seconds while foregrounded and when focus returns. Use the refresh button for an immediate refresh, including calendar metadata. There is no speculative date prefetch or bounded-query `syncToken` use.
 - Requests are limited to four globally and two per account, with coalescing and backoff. One account's failure does not clear another account's data. The status banner distinguishes missing coverage and failed refreshes from an empty calendar.
 - Search covers **downloaded dates** across visible calendars. It does not query all of Google Calendar. Cached events remain available offline; writes require a connection and are never queued for automatic offline replay.

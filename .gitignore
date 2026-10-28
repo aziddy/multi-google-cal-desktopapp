@@ -5,6 +5,8 @@ coverage/
 *.tsbuildinfo
 src-tauri/target/
 src-tauri/gen/
+temp/
+tmp/
 
 # Browser test artifacts
 playwright-report/

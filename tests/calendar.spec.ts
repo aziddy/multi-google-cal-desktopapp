@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { Temporal } from '@js-temporal/polyfill'
 
-async function chooseView(page: Page, view: 'Day' | 'Week' | 'Month' | 'Schedule') {
+async function chooseView(page: Page, view: 'Day' | 'Week' | 'Month' | 'Schedule' | '7 days') {
   await page.getByRole('button', { name: 'Choose calendar view' }).click()
   await page.getByRole('menuitemradio', { name: new RegExp(`^${view}`) }).click()
   await expect(page.getByRole('region', { name: `${view} calendar`, exact: true })).toBeVisible()
@@ -29,7 +29,7 @@ test.beforeEach(async ({ page }) => {
 
 test('all calendar views and date navigation work', async ({ page }) => {
   const heading = page.getByRole('heading', { level: 1 })
-  for (const view of ['Day', 'Week', 'Month', 'Schedule'] as const) {
+  for (const view of ['Day', 'Week', 'Month', 'Schedule', '7 days'] as const) {
     await chooseView(page, view)
     const calendar = page.getByRole('region', { name: `${view} calendar`, exact: true })
     const original = await calendar.innerText()
@@ -43,6 +43,71 @@ test('all calendar views and date navigation work', async ({ page }) => {
   await page.getByRole('button', { name: 'Next period', exact: true }).click()
   await page.getByRole('button', { name: 'Today', exact: true }).click()
   await expect(heading).toHaveText(original!)
+})
+
+test('7 days rolls from the selected date, navigates by seven, and survives reload', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-10-27T17:00:00Z'))
+  await page.reload()
+  await chooseView(page, '7 days')
+  const calendar = page.getByRole('region', { name: '7 days calendar', exact: true })
+  const headings = calendar.locator('.day-heading')
+  const heading = page.getByRole('heading', { level: 1 })
+  await expect(headings).toHaveCount(7)
+  await expect(headings.first()).toHaveAccessibleName('View Tuesday, October 27, 2026')
+  await expect(headings.last()).toHaveAccessibleName('View Monday, November 2, 2026')
+  await expect(heading).toHaveText('Oct – Nov 2026')
+
+  await calendar
+    .getByRole('button', { name: 'Create all-day event on 2026-11-02', exact: true })
+    .click()
+  const editor = page.getByRole('dialog', { name: 'Create event', exact: true })
+  await expect(editor.getByLabel('Start date', { exact: true })).toHaveValue('2026-11-02')
+  await editor.getByRole('textbox', { name: 'Event title' }).fill('A moment next month')
+  await editor.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(editor).not.toBeVisible()
+  await expect(
+    calendar.getByRole('button', { name: 'A moment next month', exact: true }),
+  ).toBeVisible()
+
+  await page.getByRole('gridcell', { name: 'Thursday, October 29, 2026', exact: true }).click()
+  await expect(headings.first()).toHaveAccessibleName('View Thursday, October 29, 2026')
+  await expect(headings.last()).toHaveAccessibleName('View Wednesday, November 4, 2026')
+  await page.getByRole('button', { name: 'Next period', exact: true }).click()
+  await expect(headings.first()).toHaveAccessibleName('View Thursday, November 5, 2026')
+  await expect(headings.last()).toHaveAccessibleName('View Wednesday, November 11, 2026')
+  await page.getByRole('button', { name: 'Previous period', exact: true }).click()
+  await expect(headings.first()).toHaveAccessibleName('View Thursday, October 29, 2026')
+  await page.getByRole('button', { name: 'Today', exact: true }).click()
+  await expect(headings.first()).toHaveAccessibleName('View Tuesday, October 27, 2026')
+
+  await chooseView(page, 'Week')
+  await expect(page.locator('.day-heading').first()).toHaveAccessibleName(
+    'View Sunday, October 25, 2026',
+  )
+  await page.keyboard.press('x')
+  await expect(headings.first()).toHaveAccessibleName('View Tuesday, October 27, 2026')
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Choose calendar view' })).toHaveText('7 days')
+  await expect(headings.first()).toHaveAccessibleName('View Tuesday, October 27, 2026')
+  await expect(
+    calendar.getByRole('button', { name: 'A moment next month', exact: true }),
+  ).toBeVisible()
+})
+
+test('7 days shows both years when its dates span New Year', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-12-29T17:00:00Z'))
+  await page.reload()
+  await page.keyboard.press('x')
+  const calendar = page.getByRole('region', { name: '7 days calendar', exact: true })
+  await expect(calendar.locator('.day-heading').first()).toHaveAccessibleName(
+    'View Tuesday, December 29, 2026',
+  )
+  await expect(calendar.locator('.day-heading').last()).toHaveAccessibleName(
+    'View Monday, January 4, 2027',
+  )
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dec 2026 – Jan 2027')
 })
 
 test('calendar visibility filters events and survives reload', async ({ page }) => {
@@ -278,7 +343,7 @@ test('keyboard shortcuts and accessible dialogs work', async ({ page }) => {
   await page.keyboard.press('c')
   const editor = page.getByRole('dialog', { name: 'Create event', exact: true })
   await expect(editor).toBeVisible()
-  await editor.getByRole('textbox', { name: 'Event title' }).press('w')
+  await editor.getByRole('textbox', { name: 'Event title' }).press('x')
   await page.keyboard.press('Escape')
   await expect(editor).not.toBeVisible()
   await expect(page.getByRole('button', { name: 'Choose calendar view' })).toHaveText('Day')
@@ -289,6 +354,9 @@ test('keyboard shortcuts and accessible dialogs work', async ({ page }) => {
   const help = page.getByRole('dialog', { name: 'Your calendars, one place.', exact: true })
   await expect(help).toBeVisible()
   await expect(help.getByText(/This preview uses fictional accounts/)).toBeVisible()
+  await expect(
+    help.getByText('Day / Week / Month / Schedule / 7 days', { exact: true }),
+  ).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(help).not.toBeVisible()
 })
@@ -303,7 +371,7 @@ test('capture all views in both themes and at a compact desktop width', async ({
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
     await settings.getByRole('button', { name: theme, exact: true }).click()
     await settings.getByRole('button', { name: 'Close settings' }).click()
-    for (const view of ['Day', 'Week', 'Month', 'Schedule'] as const) {
+    for (const view of ['Day', 'Week', 'Month', 'Schedule', '7 days'] as const) {
       await chooseView(page, view)
       const path = testInfo.outputPath(`${theme.toLowerCase()}-${view.toLowerCase()}.png`)
       await page.screenshot({ path, animations: 'disabled' })

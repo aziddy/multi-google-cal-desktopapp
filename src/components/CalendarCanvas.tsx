@@ -10,9 +10,9 @@ import {
   moveEvent,
   resizeEvent,
   canChangeEvent,
-  startOfWeek,
   timedSegments,
   todayDate,
+  viewRange,
 } from '../domain/calendar'
 import type { Calendar, CalendarEvent, CalendarView, EventInput } from '../domain/types'
 import { eventTime } from '../domain/display'
@@ -59,8 +59,9 @@ function TimeView({
   onOpenDate,
   onUpdate,
 }: Props) {
+  const { startDate } = viewRange(date, view, timeZone)
   const days = Array.from({ length: view === 'day' ? 1 : 7 }, (_, index) =>
-    addDays(view === 'day' ? date : startOfWeek(date), index),
+    addDays(startDate, index),
   )
   const scrollRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -204,7 +205,10 @@ function TimeView({
     })
 
   return (
-    <section className="time-view" aria-label={`${view === 'day' ? 'Day' : 'Week'} calendar`}>
+    <section
+      className="time-view"
+      aria-label={`${view === 'day' ? 'Day' : view === '7days' ? '7 days' : 'Week'} calendar`}
+    >
       <div className="time-header" style={{ '--day-count': days.length } as CSSProperties}>
         <div className="time-header-gutter" />
         {days.map((day) => (

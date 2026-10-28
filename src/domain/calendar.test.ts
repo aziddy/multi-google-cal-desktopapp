@@ -70,6 +70,31 @@ describe('date navigation', () => {
     expect(addMonths('2026-03-31', -1)).toBe('2026-02-28')
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01')
   })
+  it('anchors 7 days on the selected date and includes the final day in sync coverage', () => {
+    const range = viewRange('2026-10-27', '7days', zone)
+    expect(range).toEqual({ startDate: '2026-10-27', endDate: '2026-11-03', timeZone: zone })
+    expect(viewRange('2026-10-27', 'week', zone)).toEqual({
+      startDate: '2026-10-25',
+      endDate: '2026-11-01',
+      timeZone: zone,
+    })
+    expect(utcMonthBuckets(range)).toEqual([
+      { startDate: '2026-10-01', endDate: '2026-11-01', timeZone: 'UTC' },
+      { startDate: '2026-11-01', endDate: '2026-12-01', timeZone: 'UTC' },
+    ])
+    expect(viewRange('2026-12-29', '7days', zone).endDate).toBe('2027-01-05')
+  })
+  it.each([
+    ['2026-03-06', '2026-03-13', 167],
+    ['2026-10-27', '2026-11-03', 169],
+  ])('keeps seven local dates across DST starting %s', (date, endDate, hours) => {
+    const range = viewRange(date, '7days', zone)
+    expect(range.startDate).toBe(date)
+    expect(range.endDate).toBe(endDate)
+    const start = Temporal.PlainDate.from(range.startDate).toZonedDateTime(zone)
+    const end = Temporal.PlainDate.from(range.endDate).toZonedDateTime(zone)
+    expect(start.until(end, { largestUnit: 'hours' }).hours).toBe(hours)
+  })
   it('returns six complete Sunday-first weeks', () => {
     const dates = monthDays('2026-10-26')
     expect(dates).toHaveLength(42)

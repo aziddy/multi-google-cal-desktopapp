@@ -107,7 +107,7 @@ export const usePreferences = create<Preferences>()(
           ...current,
           date: todayDate(timeZone),
           timeZone,
-          view: ['day', 'week', 'month', 'schedule'].includes(saved.view ?? '')
+          view: ['day', 'week', 'month', 'schedule', '7days'].includes(saved.view ?? '')
             ? saved.view!
             : current.view,
           theme: ['system', 'light', 'dark'].includes(saved.theme ?? '')

@@ -37,7 +37,6 @@ import {
   canChangeEvent,
   formatDate,
   monthDays,
-  startOfWeek,
   todayDate,
   viewRange,
 } from './domain/calendar'
@@ -61,6 +60,7 @@ const VIEWS: { value: CalendarView; name: string; key: string }[] = [
   { value: 'week', name: 'Week', key: 'W' },
   { value: 'month', name: 'Month', key: 'M' },
   { value: 'schedule', name: 'Schedule', key: 'A' },
+  { value: '7days', name: '7 days', key: 'X' },
 ]
 
 const EMPTY_ACCOUNTS: Account[] = []
@@ -119,12 +119,8 @@ function App() {
   const searchRef = useRef<HTMLInputElement>(null)
   const viewMenuRef = useRef<HTMLDivElement>(null)
   const today = todayDate(timeZone)
-  const google = useGoogleSync(
-    dataSource === 'google',
-    calendars,
-    hiddenCalendarIds,
-    viewRange(date, view, timeZone),
-  )
+  const range = viewRange(date, view, timeZone)
+  const google = useGoogleSync(dataSource === 'google', calendars, hiddenCalendarIds, range)
 
   useEffect(() => {
     document.documentElement.dataset.native = String(isTauri())
@@ -188,7 +184,7 @@ function App() {
         event.preventDefault()
         setSearchOpen(true)
         window.setTimeout(() => searchRef.current?.focus(), 0)
-      } else if (['d', 'w', 'm', 'a'].includes(key))
+      } else if (VIEWS.some((item) => item.key.toLowerCase() === key))
         setView(VIEWS.find((item) => item.key.toLowerCase() === key)!.value)
       else return
       if (key !== '/') event.preventDefault()
@@ -250,7 +246,10 @@ function App() {
     setDate(
       view === 'month'
         ? addMonths(date, direction)
-        : addDays(date, direction * (view === 'week' ? 7 : view === 'schedule' ? 30 : 1)),
+        : addDays(
+            date,
+            direction * (view === 'week' || view === '7days' ? 7 : view === 'schedule' ? 30 : 1),
+          ),
     )
   }
 
@@ -271,13 +270,17 @@ function App() {
         .includes(search.toLowerCase().trim()),
     )
     .sort((a, b) => a.start.localeCompare(b.start))
-  const rangeEnd = view === 'week' ? addDays(startOfWeek(date), 6) : date
+  const multiDay = view === 'week' || view === '7days'
+  const rangeEnd = addDays(range.endDate, -1)
   const heading =
     view === 'day'
       ? formatDate(date, { month: 'long', day: 'numeric', year: 'numeric' })
-      : view === 'week' && startOfWeek(date).slice(0, 7) !== rangeEnd.slice(0, 7)
-        ? `${formatDate(startOfWeek(date), { month: 'short' })} – ${formatDate(rangeEnd, { month: 'short', year: 'numeric' })}`
-        : formatDate(view === 'week' ? startOfWeek(date) : date, { month: 'long', year: 'numeric' })
+      : multiDay && range.startDate.slice(0, 7) !== rangeEnd.slice(0, 7)
+        ? `${formatDate(range.startDate, {
+            month: 'short',
+            ...(range.startDate.slice(0, 4) !== rangeEnd.slice(0, 4) && { year: 'numeric' }),
+          })} – ${formatDate(rangeEnd, { month: 'short', year: 'numeric' })}`
+        : formatDate(multiDay ? range.startDate : date, { month: 'long', year: 'numeric' })
   const error = accountsQuery.error || calendarsQuery.error || eventsQuery.error
   const loading = accountsQuery.isPending || calendarsQuery.isPending || eventsQuery.isPending
 
@@ -1115,7 +1118,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['Create event', 'C'],
               ['Today', 'T'],
               ['Search', '/'],
-              ['Day / Week / Month / Schedule', 'D W M A'],
+              ['Day / Week / Month / Schedule / 7 days', 'D W M A X'],
             ].map(([label, key]) => (
               <div key={key}>
                 <span>{label}</span>

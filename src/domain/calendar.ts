@@ -43,7 +43,8 @@ export function monthDays(date: string): string[] {
 export function viewRange(date: string, view: CalendarView, timeZone: string): DateRange {
   const startDate =
     view === 'week' ? startOfWeek(date) : view === 'month' ? monthDays(date)[0] : date
-  const days = view === 'day' ? 1 : view === 'week' ? 7 : view === 'month' ? 42 : 30
+  const days =
+    view === 'day' ? 1 : view === 'week' || view === '7days' ? 7 : view === 'month' ? 42 : 30
   return { startDate, endDate: addDays(startDate, days), timeZone }
 }
 

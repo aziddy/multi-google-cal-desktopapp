@@ -1,4 +1,4 @@
-export type CalendarView = 'day' | 'week' | 'month' | 'schedule'
+export type CalendarView = 'day' | 'week' | 'month' | 'schedule' | '7days'
 export type Theme = 'system' | 'light' | 'dark'
 
 export interface Account {
