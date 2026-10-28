@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Temporal } from '@js-temporal/polyfill'
 import { AlignLeft, CalendarDays, Clock3, MapPin, Trash2, X } from 'lucide-react'
@@ -10,6 +10,8 @@ import type {
   MutationScope,
 } from '../domain/types'
 import { buildRecurrence, parseRecurrence } from '../domain/recurrence'
+import { canChangeEvent } from '../domain/calendar'
+import { isEditableTarget, shortcutAction } from '../keyboardShortcuts'
 import { RecurrenceControls } from './RecurrenceControls'
 import { dateTimeFields, resolveTimedEventRange } from './eventEditorTime'
 import './dialogs.css'
@@ -63,6 +65,7 @@ function errorMessage(error: unknown) {
 export function EventEditor(props: EventEditorProps) {
   const { event, calendars, onClose, onSave, onDelete } = props
   const formId = useId()
+  const formRef = useRef<HTMLFormElement>(null)
   const [title, setTitle] = useState(event?.title ?? '')
   const [calendarId, setCalendarId] = useState(
     event?.calendarId ??
@@ -99,6 +102,18 @@ export function EventEditor(props: EventEditorProps) {
   const calendar = calendars.find((item) => item.id === calendarId)
   const setField = (field: keyof typeof fields, value: string) =>
     setFields((current) => ({ ...current, [field]: value }))
+
+  useEffect(() => {
+    // Disabling the fields during a write can move focus out of the dialog.
+    // Continue consuming save commands there without submitting another write.
+    function saveShortcut(e: KeyboardEvent) {
+      if (shortcutAction(e) !== 'save') return
+      e.preventDefault()
+      if (!e.repeat && !pending && !confirmDelete) formRef.current?.requestSubmit()
+    }
+    document.addEventListener('keydown', saveShortcut)
+    return () => document.removeEventListener('keydown', saveShortcut)
+  }, [pending, confirmDelete])
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -194,6 +209,18 @@ export function EventEditor(props: EventEditorProps) {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content
           className="calendar-dialog event-editor"
+          onKeyDown={(e) => {
+            const action = shortcutAction(e.nativeEvent)
+            if (
+              action === 'delete' &&
+              !isEditableTarget(e.target) &&
+              event &&
+              canChangeEvent(event, 'delete')
+            ) {
+              e.preventDefault()
+              if (!e.repeat && !pending && !confirmDelete) setConfirmDelete(true)
+            }
+          }}
           onEscapeKeyDown={(e) => {
             if (pending) e.preventDefault()
           }}
@@ -220,6 +247,7 @@ export function EventEditor(props: EventEditorProps) {
             Save an event to a writable calendar.
           </Dialog.Description>
           <form
+            ref={formRef}
             id={formId}
             onSubmit={(e) => {
               void submit(e)
@@ -453,7 +481,7 @@ export function EventEditor(props: EventEditorProps) {
           )}
           <div className="dialog-footer">
             <div>
-              {event && !confirmDelete && (
+              {event && canChangeEvent(event, 'delete') && !confirmDelete && (
                 <button
                   type="button"
                   className="dialog-icon-button delete-event-button"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -44,7 +44,6 @@ import type {
   Account,
   Calendar,
   CalendarEvent,
-  CalendarView,
   EventInput,
   MutationOptions,
   MutationScope,
@@ -54,14 +53,8 @@ import { CalendarCanvas } from './components/CalendarCanvas'
 import { eventTime } from './domain/display'
 import { EventEditor } from './components/EventEditor'
 import { SettingsDialog } from './components/SettingsDialog'
-
-const VIEWS: { value: CalendarView; name: string; key: string }[] = [
-  { value: 'day', name: 'Day', key: 'D' },
-  { value: 'week', name: 'Week', key: 'W' },
-  { value: 'month', name: 'Month', key: 'M' },
-  { value: 'schedule', name: 'Schedule', key: 'A' },
-  { value: '7days', name: '7 days', key: 'X' },
-]
+import { GoToDateDialog } from './components/GoToDateDialog'
+import { CALENDAR_VIEWS, isEditableTarget, shortcutAction } from './keyboardShortcuts'
 
 const EMPTY_ACCOUNTS: Account[] = []
 const EMPTY_CALENDARS: Calendar[] = []
@@ -112,15 +105,37 @@ function App() {
   const [selected, setSelected] = useState<CalendarEvent | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [goToDateOpen, setGoToDateOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [viewMenu, setViewMenu] = useState(false)
   const [toast, setToast] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
+  const searchButtonRef = useRef<HTMLButtonElement>(null)
   const viewMenuRef = useRef<HTMLDivElement>(null)
   const today = todayDate(timeZone)
   const range = useMemo(() => viewRange(date, view, timeZone), [date, view, timeZone])
   const google = useGoogleSync(dataSource === 'google', calendars, hiddenCalendarIds, range)
+
+  const navigate = useCallback(
+    (direction: number) => {
+      setDate(
+        view === 'month'
+          ? addMonths(date, direction)
+          : addDays(
+              date,
+              direction * (view === 'week' || view === '7days' ? 7 : view === 'schedule' ? 30 : 1),
+            ),
+      )
+    },
+    [date, view, setDate],
+  )
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearch('')
+    window.requestAnimationFrame(() => searchButtonRef.current?.focus())
+  }, [])
 
   useEffect(() => {
     document.documentElement.dataset.native = String(isTauri())
@@ -161,37 +176,82 @@ function App() {
 
   useEffect(() => {
     function shortcuts(event: KeyboardEvent) {
+      const action = shortcutAction(event)
       if (
-        event.target instanceof HTMLElement &&
-        event.target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')
-      )
-        return
-      if (
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
+        !action ||
         editor ||
         selected ||
         settingsOpen ||
-        helpOpen
+        helpOpen ||
+        goToDateOpen ||
+        (event.target instanceof Element && event.target.closest('[role="dialog"]'))
       )
         return
-      const key = event.key.toLowerCase()
-      if (key === 't') setDate(todayDate(timeZone))
-      else if (key === 'c') setEditor({ date, minute: 540 })
-      else if (key === '/') {
+      if (
+        isEditableTarget(event.target) &&
+        !(action === 'help' && (event.metaKey || event.ctrlKey)) &&
+        !(action === 'escape' && searchOpen)
+      )
+        return
+      // Event actions belong to their dialog; don't intercept browser/text commands here.
+      if (action === 'edit' || action === 'delete' || action === 'save') return
+      if (action === 'escape') {
+        if (viewMenu || !searchOpen) return
         event.preventDefault()
-        setSearchOpen(true)
-        window.setTimeout(() => searchRef.current?.focus(), 0)
-      } else if (VIEWS.some((item) => item.key.toLowerCase() === key))
-        setView(VIEWS.find((item) => item.key.toLowerCase() === key)!.value)
-      else return
-      if (key !== '/') event.preventDefault()
+        closeSearch()
+        return
+      }
+      event.preventDefault()
+      if (event.repeat) return
+      setViewMenu(false)
+      switch (action) {
+        case 'previous':
+          navigate(-1)
+          break
+        case 'next':
+          navigate(1)
+          break
+        case 'today':
+          setDate(todayDate(timeZone))
+          break
+        case 'goToDate':
+          setGoToDateOpen(true)
+          break
+        case 'create':
+        case 'createAllDay':
+          setEditor({ date, minute: 540, allDay: action === 'createAllDay' })
+          break
+        case 'search':
+          setSearchOpen(true)
+          window.setTimeout(() => searchRef.current?.focus(), 0)
+          break
+        case 'settings':
+          setSettingsOpen(true)
+          break
+        case 'help':
+          setHelpOpen(true)
+          break
+        default:
+          setView(action)
+      }
     }
     document.addEventListener('keydown', shortcuts)
     return () => document.removeEventListener('keydown', shortcuts)
-  }, [date, timeZone, setDate, setView, editor, selected, settingsOpen, helpOpen])
+  }, [
+    date,
+    timeZone,
+    setDate,
+    setView,
+    navigate,
+    closeSearch,
+    editor,
+    selected,
+    settingsOpen,
+    helpOpen,
+    goToDateOpen,
+    searchOpen,
+    viewMenu,
+  ])
 
   const saveMutation = useMutation({
     mutationFn: ({
@@ -240,17 +300,6 @@ function App() {
     setSelected(null)
     setSearch('')
     setToast('Demo calendars reset')
-  }
-
-  function navigate(direction: number) {
-    setDate(
-      view === 'month'
-        ? addMonths(date, direction)
-        : addDays(
-            date,
-            direction * (view === 'week' || view === '7days' ? 7 : view === 'schedule' ? 30 : 1),
-          ),
-    )
   }
 
   function openDate(day: string) {
@@ -322,21 +371,8 @@ function App() {
                   dataSource === 'google' ? 'Search downloaded events' : 'Search your calendars'
                 }
                 aria-label="Search events"
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    setSearchOpen(false)
-                    setSearch('')
-                  }
-                }}
               />
-              <button
-                className="icon-button"
-                aria-label="Close search"
-                onClick={() => {
-                  setSearchOpen(false)
-                  setSearch('')
-                }}
-              >
+              <button className="icon-button" aria-label="Close search" onClick={closeSearch}>
                 <X size={20} />
               </button>
             </div>
@@ -365,12 +401,22 @@ function App() {
                   <ChevronRight size={21} />
                 </button>
               </div>
-              <h1>{heading}</h1>
+              <h1>
+                <button
+                  className="date-heading-button"
+                  aria-label={`Go to date, ${heading}`}
+                  title="Go to date (G)"
+                  onClick={() => setGoToDateOpen(true)}
+                >
+                  {heading}
+                </button>
+              </h1>
             </>
           )}
           <div className="header-actions">
             {!searchOpen && (
               <button
+                ref={searchButtonRef}
                 className="icon-button"
                 aria-label="Search events"
                 title="Search (/)"
@@ -406,12 +452,12 @@ function App() {
                 aria-haspopup="menu"
                 onClick={() => setViewMenu(!viewMenu)}
               >
-                {VIEWS.find((item) => item.value === view)?.name}
+                {CALENDAR_VIEWS.find((item) => item.value === view)?.name}
                 <ChevronDown size={16} />
               </button>
               {viewMenu && (
                 <div className="view-menu" role="menu" aria-label="Calendar views">
-                  {VIEWS.map((item) => (
+                  {CALENDAR_VIEWS.map((item) => (
                     <button
                       role="menuitemradio"
                       aria-checked={view === item.value}
@@ -423,7 +469,9 @@ function App() {
                     >
                       <span>{view === item.value && <Check size={16} />}</span>
                       {item.name}
-                      <kbd>{item.key}</kbd>
+                      <kbd>
+                        {item.number} / {item.key}
+                      </kbd>
                     </button>
                   ))}
                 </div>
@@ -596,6 +644,18 @@ function App() {
         />
       )}
       {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
+      {goToDateOpen && (
+        <GoToDateDialog
+          date={date}
+          onClose={() => setGoToDateOpen(false)}
+          onGo={(day) => {
+            setDate(day)
+            setSearchOpen(false)
+            setSearch('')
+            setGoToDateOpen(false)
+          }}
+        />
+      )}
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={18} />
@@ -866,6 +926,19 @@ function EventPreview({
         <Dialog.Content
           className="event-preview"
           aria-describedby="preview-description"
+          onKeyDown={(e) => {
+            if (isEditableTarget(e.target)) return
+            const action = shortcutAction(e.nativeEvent)
+            if (
+              (action === 'edit' && canChangeEvent(actionEvent, 'edit')) ||
+              (action === 'delete' && canChangeEvent(actionEvent, 'delete'))
+            ) {
+              e.preventDefault()
+              if (e.repeat || pending || confirmDelete) return
+              if (action === 'edit') void edit()
+              else setConfirmDelete(true)
+            }
+          }}
           onEscapeKeyDown={(e) => {
             if (pending) e.preventDefault()
           }}
@@ -1087,6 +1160,7 @@ function SearchResults({
 }
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
+  const command = /Macintosh|Mac OS X/.test(navigator.userAgent) ? '⌘' : 'Ctrl'
   return (
     <Dialog.Root
       open
@@ -1118,14 +1192,26 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
           <h3>Make yourself at home</h3>
           <p className="help-instructions">
             Click an empty time slot to create an event. Drag events to move them, or drag their
-            bottom edge to resize.
+            bottom edge to resize. Letter shortcuts work outside text fields and dialogs. In event
+            details, use E to edit or Delete to ask for confirmation. Save shortcuts also work while
+            typing in the editor.
           </p>
           <div className="shortcut-list">
             {[
-              ['Create event', 'C'],
+              ['Previous period', 'P / K'],
+              ['Next period', 'N / J'],
               ['Today', 'T'],
+              ['Go to date', 'G'],
+              ...CALENDAR_VIEWS.map((view) => [view.name, `${view.number} / ${view.key}`]),
+              ['Create timed event', 'C / Shift C'],
+              ['Create all-day event', 'Q'],
+              ['Edit opened event', 'E'],
+              ['Delete opened event (confirm first)', 'Backspace / Delete'],
+              ['Save event', `${command} S / ${command} Enter`],
+              ['Close dialog / return from search', 'Esc'],
               ['Search', '/'],
-              ['Day / Week / Month / Schedule / 7 days', 'D W M A X'],
+              ['Settings', 'S'],
+              ['Keyboard shortcuts', `${command} / or ?`],
             ].map(([label, key]) => (
               <div key={key}>
                 <span>{label}</span>

@@ -245,6 +245,20 @@ textarea::placeholder {
   margin: 0;
   letter-spacing: -0.4px;
 }
+.date-heading-button {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px;
+  margin: -4px;
+  cursor: pointer;
+}
+.date-heading-button:hover {
+  background: var(--hover);
+}
 .header-actions {
   display: flex;
   align-items: center;
@@ -1413,7 +1427,7 @@ textarea::placeholder {
   top: 50%;
   transform: translate(-50%, -50%);
   z-index: 101;
-  width: 480px;
+  width: min(560px, calc(100vw - 32px));
   max-height: 90vh;
   overflow: auto;
   border-radius: 22px;
@@ -1483,6 +1497,8 @@ textarea::placeholder {
   justify-content: space-between;
   font-size: 12px;
   padding: 8px 0;
+  align-items: center;
+  gap: 16px;
 }
 .shortcut-list kbd {
   font-family: inherit;
@@ -1492,6 +1508,8 @@ textarea::placeholder {
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .help-license {
   color: var(--muted);

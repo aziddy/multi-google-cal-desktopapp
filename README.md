@@ -54,12 +54,33 @@ Open `http://127.0.0.1:1420`. Browser preview uses local demo calendars and brow
 ## Calendar behavior
 
 - Day, Week, Month (all 42 cells), 30-day Schedule, and rolling 7 days views download complete UTC month buckets covering the visible dates. All pages are fetched before a bucket is replaced transactionally; copies are deduplicated by account, calendar, and event.
-- Choose **7 days** from the view menu or press **X** to show seven consecutive days starting on the selected date. Previous/Next moves by seven days; Today starts the range on today. Week remains Sunday-first. View shortcuts are **D** (Day), **W** (Week), **M** (Month), **A** (Schedule), and **X** (7 days).
+- Choose **7 days** from the view menu or press **X** to show seven consecutive days starting on the selected date. Previous/Next moves by seven days; Today starts the range on today. Week remains Sunday-first.
 - Visible calendars refresh every 60 seconds while foregrounded and when focus returns. Use the refresh button for an immediate refresh, including calendar metadata. There is no speculative date prefetch or bounded-query `syncToken` use.
 - Cached events appear without waiting for Google refreshes. Calendar views group events only for their visible dates, keeping view changes responsive as downloaded history grows.
 - Requests are limited to four globally and two per account, with coalescing and backoff. One account's failure does not clear another account's data. The status banner distinguishes missing coverage and failed refreshes from an empty calendar.
 - Search covers **downloaded dates** across visible calendars. It does not query all of Google Calendar. Cached events remain available offline; writes require a connection and are never queued for automatic offline replay.
 - Names, calendar colors, time zones, and permissions come from Google. Calendar visibility is an app-local preference. All-day dates keep their original date boundaries; timed view boundaries use the selected display zone.
+
+### Keyboard shortcuts
+
+Press **?** or **Cmd+/** (**Ctrl+/** on Windows/Linux) to open shortcut help. Letter and number shortcuts work outside text fields and dialogs. Event actions apply in the opened event's details or editor, with the same permissions, recurrence scope, and delete confirmation as the buttons. Save shortcuts work while typing in the editor. Escape closes dialogs unless a write is in progress, and returns from search to the calendar.
+
+| Action                                                   | Shortcut                                   |
+| -------------------------------------------------------- | ------------------------------------------ |
+| Previous / next period                                   | P or K / N or J                            |
+| Today                                                    | T                                          |
+| Go to date (also available by clicking the date heading) | G                                          |
+| Day / Week / Month                                       | 1 or D / 2 or W / 3 or M                   |
+| 7 days / Schedule                                        | 4 or X / 5 or A                            |
+| Create timed / all-day event                             | C or Shift+C / Q                           |
+| Edit opened event                                        | E                                          |
+| Delete opened event (confirm first)                      | Backspace or Delete                        |
+| Save event                                               | Cmd+S or Cmd+Enter (Ctrl on Windows/Linux) |
+| Search downloaded events                                 | /                                          |
+| Settings                                                 | S                                          |
+| Close dialog / return from search                        | Esc                                        |
+
+Year view, event undo, people search, Google's side panel, printing, and event-announcement shortcuts are not implemented.
 
 ### Editing and recurrence
 

@@ -354,9 +354,8 @@ test('keyboard shortcuts and accessible dialogs work', async ({ page }) => {
   const help = page.getByRole('dialog', { name: 'Your calendars, one place.', exact: true })
   await expect(help).toBeVisible()
   await expect(help.getByText(/This preview uses fictional accounts/)).toBeVisible()
-  await expect(
-    help.getByText('Day / Week / Month / Schedule / 7 days', { exact: true }),
-  ).toBeVisible()
+  await expect(help.getByText('Go to date', { exact: true })).toBeVisible()
+  await expect(help.getByText('4 / X', { exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(help).not.toBeVisible()
 })

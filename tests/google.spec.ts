@@ -408,18 +408,29 @@ test('guest-bearing Google events expose read-only details and downloaded covera
   await expect(dialog.getByRole('button', { name: 'Edit event', exact: true })).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Delete event', exact: true })).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: 'Open in Google Calendar' })).toBeVisible()
+  await page.keyboard.press('e')
+  await page.keyboard.press('Backspace')
+  await page.keyboard.press('Delete')
+  await expect(page.getByRole('dialog', { name: 'Edit event', exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('Delete this event?', { exact: true })).toHaveCount(0)
+  const mutations = await page.evaluate(() =>
+    (window as unknown as { __googleCalls: { command: string }[] }).__googleCalls.filter(
+      (call) => call.command === 'google_mutate',
+    ),
+  )
+  expect(mutations).toEqual([])
 })
 test('Google edits send explicit clearing, preserve untouched descriptions, and lock calendar moves', async ({
   page,
 }) => {
   await nativePreview(page)
   await page.locator('[data-event-id="google:a:cal:one"]').click()
-  await page.getByRole('button', { name: 'Edit event', exact: true }).first().click()
+  await page.keyboard.press('e')
   const dialog = page.getByRole('dialog', { name: 'Edit event', exact: true })
   await expect(dialog.getByLabel('Calendar', { exact: true })).toBeDisabled()
   await dialog.getByRole('textbox', { name: 'Event title' }).fill('Updated title')
   await dialog.getByRole('textbox', { name: 'Location', exact: true }).fill('')
-  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await page.keyboard.press('Meta+s')
   await expect(dialog).toHaveCount(0)
   const mutation = await page.evaluate(
     () =>
@@ -444,12 +455,66 @@ test('whole-series editor loads the original anchor and locks schedules with exc
   ])
   await page.locator('[data-event-id="google:a:cal:one"]').click()
   await page.getByLabel('Recurring event scope').selectOption('series')
-  await page.getByRole('button', { name: 'Edit event', exact: true }).first().click()
+  await page.getByRole('button', { name: 'Close event details', exact: true }).focus()
+  await page.keyboard.press('e')
   const dialog = page.getByRole('dialog', { name: 'Edit event', exact: true })
   await expect(dialog.getByLabel('Start date', { exact: true })).toHaveValue('2024-01-31')
   await expect(dialog.getByLabel('Start date', { exact: true })).toBeDisabled()
   await expect(dialog.getByLabel('Repeats', { exact: true })).toBeDisabled()
   await expect(dialog.getByRole('textbox', { name: 'Event title' })).toBeEnabled()
+})
+
+test('shortcut saves do not repeat or dismiss a pending Google write', async ({ page }) => {
+  await nativePreview(page)
+  await page.evaluate(() => {
+    const control = window as unknown as {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+      }
+      __heldMutationCalls: number
+      __releaseMutation: () => void
+    }
+    const invoke = control.__TAURI_INTERNALS__.invoke
+    control.__heldMutationCalls = 0
+    const held = new Promise<void>((resolve) => {
+      control.__releaseMutation = resolve
+    })
+    control.__TAURI_INTERNALS__.invoke = async (command, args) => {
+      if (command === 'google_mutate') {
+        control.__heldMutationCalls += 1
+        await held
+      }
+      return invoke(command, args)
+    }
+  })
+  await page.locator('[data-event-id="google:a:cal:one"]').click()
+  await page.keyboard.press('e')
+  const editor = page.getByRole('dialog', { name: 'Edit event', exact: true })
+  await editor.getByRole('textbox', { name: 'Event title' }).fill('A pending change')
+  await page.keyboard.press('Meta+s')
+  await expect(editor.getByRole('button', { name: 'Saving…', exact: true })).toBeDisabled()
+  await page.keyboard.press('Meta+s')
+  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press('Escape')
+  await expect(editor).toBeVisible()
+  expect(
+    await page.evaluate(() =>
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 's',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    ),
+  ).toBe(false)
+  expect(await page.evaluate(() => Reflect.get(window, '__heldMutationCalls'))).toBe(1)
+  await page.evaluate(() => {
+    const release = Reflect.get(window, '__releaseMutation') as () => void
+    release()
+  })
+  await expect(editor).not.toBeVisible()
 })
 
 test('locked credentials require an explicit Settings retry', async ({ page }) => {
