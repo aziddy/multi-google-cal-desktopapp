@@ -8,6 +8,7 @@ pub fn run() {
         .setup(google::setup)
         .invoke_handler(tauri::generate_handler![
             google::google_snapshot,
+            google::google_set_credential_storage,
             google::google_import_client,
             google::google_connect,
             google::google_cancel_connect,

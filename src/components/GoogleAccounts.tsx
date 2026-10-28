@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { googleRepository } from '../data/googleRepository'
+import { googleRepository, type CredentialStorage } from '../data/googleRepository'
 
 export function GoogleAccounts() {
   const client = useQueryClient()
@@ -25,7 +25,9 @@ export function GoogleAccounts() {
           ? 'Google account connected.'
           : name === 'disconnect'
             ? 'Account removed from this device.'
-            : 'Google settings updated.',
+            : name === 'storage'
+              ? 'Credential storage updated. Reconnect any accounts marked Reconnect required.'
+              : 'Google settings updated.',
       )
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Google settings could not be updated.')
@@ -40,10 +42,39 @@ export function GoogleAccounts() {
   return (
     <section className="settings-section google-accounts">
       <h3>Google accounts</h3>
-      <p className="settings-help">
-        Connect using your own Google Cloud Desktop OAuth client. Refresh tokens stay in your
-        operating system’s credential store.
+      <p className="settings-help">Connect using your own Google Cloud Desktop OAuth client.</p>
+      <label className="settings-label" htmlFor="google-credential-storage">
+        Credential storage
+      </label>
+      <select
+        id="google-credential-storage"
+        className="settings-zone-select"
+        value={snapshot?.credentialStorage ?? 'local_file'}
+        disabled={!snapshot || !!pending || !!connecting}
+        aria-describedby="google-credential-storage-help google-credential-storage-switch"
+        onChange={(e) => {
+          const storage = e.currentTarget.value as CredentialStorage
+          void run('storage', () => googleRepository.setCredentialStorage(storage))
+        }}
+      >
+        <option value="local_file">Local file (default)</option>
+        <option value="os_store">System credential store</option>
+      </select>
+      <p id="google-credential-storage-help" className="settings-help">
+        {snapshot?.credentialStorage === 'os_store'
+          ? 'Refresh tokens are saved in macOS Keychain, Windows credential storage, or Linux Secret Service. Credential access never opens password prompts on macOS.'
+          : 'Stay signed in across restarts. Refresh tokens are saved unencrypted in a local file restricted to your operating-system user. Local mode never accesses the system credential store.'}
       </p>
+      <p id="google-credential-storage-switch" className="settings-help">
+        Changes apply after current Google operations finish, without restarting. Tokens are not
+        copied between stores; credentials in the inactive store are left untouched. Reconnect
+        accounts if the selected store has no saved token. Cached calendars stay available.
+      </p>
+      {pending === 'storage' && (
+        <p className="settings-help" role="status">
+          Waiting for current Google operations to finish…
+        </p>
+      )}
       <p className="settings-help">
         {snapshot?.client
           ? `OAuth project: ${snapshot.client.projectId}`

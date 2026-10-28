@@ -56,9 +56,11 @@ existing personal accounts or cache as development fixtures.
   restrictions, recurrence and exception checks, changed-field-only updates, ETag
   preconditions, stable create IDs, and recovery receipts for uncertain writes.
   Do not introduce automatic offline write replay or calendar-to-calendar moves.
-- Keep access tokens in Rust memory and refresh tokens in secure OS storage. There
-  is no plaintext token fallback. Preserve noninteractive macOS credential access;
-  do not weaken Keychain rules, Tauri capabilities, or CSP to bypass a failure.
+- Keep access tokens in Rust memory and refresh tokens in the selected native
+  backend: a private unencrypted local file by default, or opt-in OS storage. Never
+  fall back between backends or expose tokens to React. Preserve noninteractive
+  macOS credential access; do not weaken Keychain rules, Tauri capabilities, or CSP
+  to bypass a failure.
 - Preserve keyboard access, accessible names, and dialog behavior when changing UI.
   Update the README when supported behavior or setup changes.
 

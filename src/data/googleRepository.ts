@@ -18,7 +18,10 @@ export interface SyncStatus {
   retryAt: number
   coverage: { startDate: string; endDate: string; complete: boolean; fetchedAt: number | null }[]
 }
+export type CredentialStorage = 'local_file' | 'os_store'
+
 export interface GoogleSnapshot {
+  credentialStorage: CredentialStorage
   client: { clientId: string; projectId: string } | null
   accounts: Account[]
   calendars: Calendar[]
@@ -99,6 +102,14 @@ export class GoogleRepository implements CalendarRepository {
     const result = await native<GoogleSnapshot>('google_import_client', { useSaved })
     this.epoch++
     return result
+  }
+  async setCredentialStorage(storage: CredentialStorage) {
+    this.epoch++
+    try {
+      return await native<GoogleSnapshot>('google_set_credential_storage', { storage })
+    } finally {
+      this.epoch++
+    }
   }
   async connect(reconnect?: string) {
     const result = await native<GoogleSnapshot>('google_connect', { reconnect: reconnect ?? null })

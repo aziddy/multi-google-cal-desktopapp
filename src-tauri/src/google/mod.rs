@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 mod auth;
 mod cache;
+mod credentials;
 #[cfg(target_os = "macos")]
 mod macos_store;
 mod model;
+mod private_file;
 #[cfg(test)]
 mod tests;
 pub(crate) mod writes;
 
-use auth::{Cancel, ClientConfig, OsSecrets, SecretStore};
+use auth::{Cancel, ClientConfig, SecretStore};
 use cache::Cache;
 use chrono::Utc;
+use credentials::{CredentialStorage, Credentials};
 use model::{Bucket, Error, Result};
 use reqwest::Method;
 use serde_json::{json, Value};
@@ -21,7 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{Manager, State};
-use tokio::sync::{Mutex as AsyncMutex, Semaphore};
+use tokio::sync::{Mutex as AsyncMutex, RwLock, Semaphore};
 
 struct Access {
     token: String,
@@ -48,9 +51,9 @@ struct Work {
     credential: Mutex<RefreshState>,
 }
 impl Work {
-    fn new(connection_status: &str) -> Self {
+    fn new(connection_status: &str, credential_error: Error) -> Self {
         let failure = match connection_status {
-            "credential_access_required" => Some(auth::secure_error()),
+            "credential_access_required" => Some(credential_error),
             "reconnect_required" => Some(Error::new(
                 "RECONNECT_REQUIRED",
                 "This Google account needs to be reconnected in Settings.",
@@ -77,12 +80,15 @@ pub struct Google {
     config: Mutex<Option<ClientConfig>>,
     directory: PathBuf,
     http: reqwest::Client,
-    secrets: Arc<dyn SecretStore>,
+    secrets: Credentials,
     access: Mutex<HashMap<String, Access>>,
     work: Mutex<HashMap<String, Arc<Work>>>,
     global: Semaphore,
     lifecycle: AsyncMutex<()>,
     credentials: AsyncMutex<()>,
+    // Commands hold a read guard for their full operation. Switching takes the
+    // write guard, so event writes and token rotations finish in their old store.
+    operations: RwLock<()>,
     connecting: Mutex<Option<Arc<Cancel>>>,
     syncing: Mutex<HashSet<String>>,
     #[cfg(test)]
@@ -100,24 +106,13 @@ fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
 }
 impl Google {
     pub fn new(directory: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&directory).map_err(|_| {
+        private_file::directory(&directory).map_err(|_| {
             Error::new(
                 "CACHE_FAILED",
-                "Could not create the native Google data directory.",
+                "Could not create or protect the native Google data directory.",
             )
         })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).map_err(
-                |_| {
-                    Error::new(
-                        "CACHE_FAILED",
-                        "Could not protect the native data directory.",
-                    )
-                },
-            )?;
-        }
+        let secrets = Credentials::load(&directory)?;
         let config_path = directory.join("google-client.json");
         let config = if config_path.exists() {
             Some(ClientConfig::parse(
@@ -143,24 +138,67 @@ impl Google {
                     "Could not initialize the Google HTTP client.",
                 )
             })?;
-        Ok(Self {
+        let google = Self {
             cache: Mutex::new(cache),
             config: Mutex::new(config),
             directory,
             http,
-            secrets: Arc::new(OsSecrets),
+            secrets,
             access: Mutex::new(HashMap::new()),
             work: Mutex::new(HashMap::new()),
             global: Semaphore::new(4),
             lifecycle: AsyncMutex::new(()),
             credentials: AsyncMutex::new(()),
+            operations: RwLock::new(()),
             connecting: Mutex::new(None),
             syncing: Mutex::new(HashSet::new()),
             #[cfg(test)]
             api_base: "https://www.googleapis.com/".into(),
             #[cfg(test)]
             token_endpoint: "https://oauth2.googleapis.com/token".into(),
-        })
+        };
+        if google.secrets.mode()? == CredentialStorage::LocalFile {
+            google.storage_status(false)?;
+        }
+        Ok(google)
+    }
+    fn storage_status(&self, reset: bool) -> Result<()> {
+        let accounts = lock(&self.cache)?.accounts()?;
+        for account in accounts {
+            let parts = model::parts(model::string(&account, "id"), 1)?;
+            let status = match self.secrets.get(&parts[0]) {
+                Ok(Some(_)) if !reset => continue,
+                Ok(Some(_)) => "connected",
+                Ok(None) => "reconnect_required",
+                Err(_) => "credential_access_required",
+            };
+            lock(&self.cache)?.status(&parts[0], status)?;
+        }
+        Ok(())
+    }
+    async fn set_credential_storage(&self, storage: CredentialStorage) -> Result<Value> {
+        if lock(&self.connecting)?.is_some() {
+            return Err(Error::new(
+                "BUSY",
+                "Complete or cancel Google sign-in before changing credential storage.",
+            ));
+        }
+        let _operations = self.operations.write().await;
+        let _life = self.lifecycle.lock().await;
+        let _credentials = self.credentials.lock().await;
+        if self.secrets.mode()? == storage {
+            return self.snapshot();
+        }
+        // Commit settings before clearing anything. Failed saves retain the current
+        // backend and live credentials; no credentials are copied between stores.
+        self.secrets.select(storage)?;
+        for (_, work) in lock(&self.work)?.drain() {
+            work.cancel.cancel();
+            *lock(&work.credential)? = RefreshState::default();
+        }
+        lock(&self.access)?.clear();
+        self.storage_status(true)?;
+        self.snapshot()
     }
     fn config(&self) -> Result<ClientConfig> {
         lock(&self.config)?.clone().ok_or_else(|| {
@@ -174,16 +212,17 @@ impl Google {
         let status = lock(&self.cache)?.connection_status(sub)?;
         Ok(lock(&self.work)?
             .entry(sub.into())
-            .or_insert_with(|| Arc::new(Work::new(&status)))
+            .or_insert_with(|| Arc::new(Work::new(&status, self.secrets.error())))
             .clone())
     }
     fn snapshot(&self) -> Result<Value> {
         let config = lock(&self.config)?.as_ref().map(ClientConfig::summary);
         let connecting = lock(&self.connecting)?.is_some();
+        let storage = self.secrets.mode()?;
         let cache = lock(&self.cache)?;
         let pending:Vec<_>=cache.all_pending()?.iter().map(|p|json!({"requestId":p["requestId"],"accountId":model::key(&[model::string(p,"sub")]),"operation":p["operation"],"title":p["body"]["summary"].as_str().unwrap_or("Previous event change"),"status":p["status"]})).collect();
         Ok(
-            json!({"client":config,"accounts":cache.accounts()?,"calendars":cache.calendars()?,"events":cache.events()?,"syncStatus":cache.sync_status()?,"connecting":connecting,"pendingMutations":cache.pending_count()?,"pendingWrites":pending}),
+            json!({"client":config,"credentialStorage":storage,"accounts":cache.accounts()?,"calendars":cache.calendars()?,"events":cache.events()?,"syncStatus":cache.sync_status()?,"connecting":connecting,"pendingMutations":cache.pending_count()?,"pendingWrites":pending}),
         )
     }
     async fn import(&self, use_saved: bool) -> Result<Value> {
@@ -303,7 +342,7 @@ impl Google {
                 return Err(error);
             }
             if let Some(previous)=lock(&self.work)?.remove(actual) {previous.cancel.cancel();}
-            let next=Arc::new(Work::new("connected"));lock(&next.credential)?.token=Some(refresh.clone());lock(&self.work)?.insert(actual.into(),next);
+            let next=Arc::new(Work::new("connected",self.secrets.error()));lock(&next.credential)?.token=Some(refresh.clone());lock(&self.work)?.insert(actual.into(),next);
             lock(&self.access)?.insert(actual.into(),Access{token:tokens.access_token,expires:Instant::now()+Duration::from_secs(tokens.expires_in.saturating_sub(60))});
             Ok(actual.to_string())
         }.await;
@@ -728,14 +767,23 @@ impl Google {
 }
 
 #[tauri::command]
-pub fn google_snapshot(google: State<'_, Arc<Google>>) -> Result<Value> {
+pub async fn google_snapshot(google: State<'_, Arc<Google>>) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.snapshot()
+}
+#[tauri::command]
+pub async fn google_set_credential_storage(
+    google: State<'_, Arc<Google>>,
+    storage: CredentialStorage,
+) -> Result<Value> {
+    google.set_credential_storage(storage).await
 }
 #[tauri::command]
 pub async fn google_import_client(
     google: State<'_, Arc<Google>>,
     use_saved: bool,
 ) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.import(use_saved).await
 }
 #[tauri::command]
@@ -743,6 +791,7 @@ pub async fn google_connect(
     google: State<'_, Arc<Google>>,
     reconnect: Option<String>,
 ) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.connect(reconnect).await
 }
 #[tauri::command]
@@ -757,6 +806,7 @@ pub async fn google_disconnect(
     google: State<'_, Arc<Google>>,
     account_id: String,
 ) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.disconnect(&account_id).await
 }
 #[tauri::command]
@@ -767,12 +817,14 @@ pub async fn google_sync(
     refresh_calendars: bool,
     force: bool,
 ) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google
         .sync(&calendar_id, buckets, refresh_calendars, force)
         .await
 }
 #[tauri::command]
 pub async fn google_refresh_accounts(google: State<'_, Arc<Google>>) -> Result<Value> {
+    let _operation = google.operations.read().await;
     let accounts = lock(&google.cache)?.accounts()?;
     for account in accounts {
         let p = model::parts(model::string(&account, "id"), 1)?;
@@ -809,10 +861,12 @@ pub async fn google_retry_credentials(
     google: State<'_, Arc<Google>>,
     account_id: String,
 ) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.retry_credentials(&account_id).await
 }
 #[tauri::command]
 pub async fn google_open_event(google: State<'_, Arc<Google>>, event_id: String) -> Result<()> {
+    let _operation = google.operations.read().await;
     let p = model::parts(&event_id, 3)?;
     let raw = google
         .api(

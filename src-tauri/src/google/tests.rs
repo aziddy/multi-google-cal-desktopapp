@@ -51,7 +51,14 @@ fn service() -> (Google, Arc<MemorySecrets>, Directory) {
     let mut google = Google::new(dir.0.clone()).unwrap();
     let secrets = Arc::new(MemorySecrets::default());
     secrets.set("a", "test-refresh").unwrap();
-    google.secrets = secrets.clone();
+    // Existing OS-store tests use only this synthetic store, never live credentials.
+    google.secrets = Credentials::with_stores(
+        &dir.0,
+        Arc::new(credentials::FileSecrets::new(dir.0.clone())),
+        secrets.clone(),
+    )
+    .unwrap();
+    google.secrets.select(CredentialStorage::OsStore).unwrap();
     *lock(&google.config).unwrap() = Some(ClientConfig {
         client_id: "test.apps.googleusercontent.com".into(),
         client_secret: "test-only".into(),
@@ -175,7 +182,7 @@ async fn refresh_is_coalesced_and_invalid_grants_require_reconnection() {
 }
 #[tokio::test]
 async fn secure_store_failure_does_not_disconnect_or_fall_back_to_disk() {
-    let (google, secrets, _dir) = service();
+    let (google, secrets, dir) = service();
     secrets.fail.store(true, Ordering::SeqCst);
     lock(&google.access).unwrap().clear();
     let work = google.account_work("a").unwrap();
@@ -192,6 +199,7 @@ async fn secure_store_failure_does_not_disconnect_or_fall_back_to_disk() {
         "SECURE_STORE"
     );
     assert!(lock(&google.cache).unwrap().exists("a").unwrap());
+    assert!(!dir.0.join(credentials::TOKEN_FILE).exists());
 }
 
 #[tokio::test]
@@ -263,6 +271,293 @@ async fn network_refresh_failure_is_shared_and_retries_reuse_the_native_memory_s
     assert_eq!(secrets.reads.load(Ordering::SeqCst), 1);
     task.await.unwrap();
 }
+#[tokio::test]
+async fn existing_accounts_default_to_local_reconnect_and_keep_their_cache() {
+    let dir = Directory::new();
+    let google = Google::new(dir.0.clone()).unwrap();
+    {
+        let mut cache = lock(&google.cache).unwrap();
+        cache
+            .save_account("a", &json!({"email":"demo@example.test"}))
+            .unwrap();
+        cache.status("a", "credential_access_required").unwrap();
+        cache
+            .replace_calendars("a", 0, &[json!({"id":"cal","accessRole":"owner"})])
+            .unwrap();
+        cache
+            .replace_bucket("a", "cal", 0, 0, &bucket(), &[raw_event("cached")])
+            .unwrap();
+        cache
+            .prepare_mutation(
+                "synthetic-receipt",
+                ("a", "cal", "pending"),
+                "create",
+                &json!({"summary":"Pending"}),
+                None,
+                "series",
+            )
+            .unwrap();
+    }
+    drop(google);
+    let restored = Google::new(dir.0.clone()).unwrap();
+    let snapshot = restored.snapshot().unwrap();
+    assert_eq!(snapshot["credentialStorage"], "local_file");
+    assert_eq!(
+        snapshot["accounts"][0]["connectionStatus"],
+        "reconnect_required"
+    );
+    assert_eq!(snapshot["events"].as_array().unwrap().len(), 1);
+    assert_eq!(snapshot["pendingMutations"], 1);
+    assert!(!dir.0.join(credentials::TOKEN_FILE).exists());
+    restored
+        .secrets
+        .set("a", "synthetic-local-refresh")
+        .unwrap();
+    lock(&restored.cache)
+        .unwrap()
+        .status("a", "connected")
+        .unwrap();
+    drop(restored);
+    let reopened = Google::new(dir.0.clone()).unwrap();
+    assert_eq!(
+        reopened.secrets.get("a").unwrap().as_deref(),
+        Some("synthetic-local-refresh")
+    );
+    assert_eq!(
+        reopened.snapshot().unwrap()["accounts"][0]["connectionStatus"],
+        "connected"
+    );
+    assert!(!reopened
+        .snapshot()
+        .unwrap()
+        .to_string()
+        .contains("synthetic-local-refresh"));
+}
+
+#[tokio::test]
+async fn switching_clears_memory_but_preserves_cache_receipts_and_inactive_credentials() {
+    let (google, os, dir) = service();
+    credentials::FileSecrets::new(dir.0.clone())
+        .set("a", "synthetic-local-refresh")
+        .unwrap();
+    {
+        let mut cache = lock(&google.cache).unwrap();
+        cache
+            .replace_bucket("a", "cal", 0, 0, &bucket(), &[raw_event("cached")])
+            .unwrap();
+        cache
+            .prepare_mutation(
+                "synthetic-receipt",
+                ("a", "cal", "pending"),
+                "create",
+                &json!({"summary":"Pending"}),
+                None,
+                "series",
+            )
+            .unwrap();
+    }
+    let old = google.account_work("a").unwrap();
+    lock(&old.credential).unwrap().token = Some("synthetic-old-memory".into());
+    let snapshot = google
+        .set_credential_storage(CredentialStorage::LocalFile)
+        .await
+        .unwrap();
+    assert_eq!(snapshot["credentialStorage"], "local_file");
+    assert_eq!(snapshot["accounts"][0]["connectionStatus"], "connected");
+    assert_eq!(snapshot["events"].as_array().unwrap().len(), 1);
+    assert_eq!(snapshot["pendingMutations"], 1);
+    assert!(old.cancel.check().is_err());
+    assert!(lock(&old.credential).unwrap().token.is_none());
+    assert!(lock(&google.access).unwrap().is_empty());
+    assert!(lock(&google.work).unwrap().is_empty());
+    assert_eq!(
+        google.secrets.get("a").unwrap().as_deref(),
+        Some("synthetic-local-refresh")
+    );
+    assert_eq!(os.reads.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        lock(&os.values).unwrap().get("a").map(String::as_str),
+        Some("test-refresh")
+    );
+    let snapshot = google
+        .set_credential_storage(CredentialStorage::OsStore)
+        .await
+        .unwrap();
+    assert_eq!(snapshot["credentialStorage"], "os_store");
+    assert_eq!(snapshot["accounts"][0]["connectionStatus"], "connected");
+    assert_eq!(
+        credentials::FileSecrets::new(dir.0.clone())
+            .get("a")
+            .unwrap()
+            .as_deref(),
+        Some("synthetic-local-refresh")
+    );
+}
+
+#[tokio::test]
+async fn empty_local_store_does_not_reuse_os_or_in_memory_tokens() {
+    let (google, os, _dir) = service();
+    let old = google.account_work("a").unwrap();
+    lock(&old.credential).unwrap().token = Some("synthetic-old-memory".into());
+    os.fail.store(true, Ordering::SeqCst);
+    let snapshot = google
+        .set_credential_storage(CredentialStorage::LocalFile)
+        .await
+        .unwrap();
+    assert_eq!(
+        snapshot["accounts"][0]["connectionStatus"],
+        "reconnect_required"
+    );
+    let work = google.account_work("a").unwrap();
+    assert_eq!(
+        google.access_token("a", &work).await.unwrap_err().code,
+        "RECONNECT_REQUIRED"
+    );
+    assert_eq!(os.reads.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn local_refresh_rotation_and_disconnect_never_touch_the_system_store() {
+    let (mut google, os, dir) = service();
+    credentials::FileSecrets::new(dir.0.clone())
+        .set("a", "synthetic-local-refresh")
+        .unwrap();
+    os.fail.store(true, Ordering::SeqCst);
+    google
+        .set_credential_storage(CredentialStorage::LocalFile)
+        .await
+        .unwrap();
+    let (base, task) = server(vec![reply(200, json!({"access_token":"synthetic-access","refresh_token":"synthetic-rotated","expires_in":3600}), "POST /")]).await;
+    google.token_endpoint = base;
+    let work = google.account_work("a").unwrap();
+    assert_eq!(
+        google.access_token("a", &work).await.unwrap(),
+        "synthetic-access"
+    );
+    assert_eq!(
+        credentials::FileSecrets::new(dir.0.clone())
+            .get("a")
+            .unwrap()
+            .as_deref(),
+        Some("synthetic-rotated")
+    );
+    google.disconnect(&model::key(&["a"])).await.unwrap();
+    assert_eq!(
+        credentials::FileSecrets::new(dir.0.clone())
+            .get("a")
+            .unwrap(),
+        None
+    );
+    assert_eq!(os.reads.load(Ordering::SeqCst), 0);
+    assert!(lock(&os.values).unwrap().contains_key("a"));
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn switching_waits_for_an_in_flight_rotation_to_finish_in_its_original_store() {
+    let (mut google, os, dir) = service();
+    lock(&google.access).unwrap().clear();
+    let mut response = reply(
+        200,
+        json!({"access_token":"synthetic-access","refresh_token":"synthetic-rotated-os","expires_in":3600}),
+        "POST /",
+    );
+    response.delay = 100;
+    let (base, task) = server(vec![response]).await;
+    google.token_endpoint = base;
+    let (ready, started) = tokio::sync::oneshot::channel();
+    let refresh = async {
+        let _operation = google.operations.read().await;
+        ready.send(()).unwrap();
+        let work = google.account_work("a").unwrap();
+        google.access_token("a", &work).await.unwrap()
+    };
+    let change = async {
+        started.await.unwrap();
+        let mut switch = Box::pin(google.set_credential_storage(CredentialStorage::LocalFile));
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut switch)
+            .await
+            .is_err());
+        assert_eq!(google.secrets.mode().unwrap(), CredentialStorage::OsStore);
+        switch.await.unwrap();
+    };
+    let (access, ()) = tokio::join!(refresh, change);
+    assert_eq!(access, "synthetic-access");
+    assert_eq!(
+        lock(&os.values).unwrap().get("a").map(String::as_str),
+        Some("synthetic-rotated-os")
+    );
+    assert_eq!(
+        credentials::FileSecrets::new(dir.0.clone())
+            .get("a")
+            .unwrap(),
+        None
+    );
+    assert!(lock(&google.access).unwrap().is_empty());
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn switching_waits_for_an_uncertain_event_write_and_preserves_its_receipt() {
+    let (mut google, _, _dir) = service();
+    let mut response = reply(503, json!({}), "POST /calendar/v3/calendars/cal/events");
+    response.delay = 100;
+    let (base, task) = server(vec![
+        response,
+        reply(503, json!({}), "GET /calendar/v3/calendars/cal/events/"),
+    ])
+    .await;
+    google.api_base = base;
+    let mutation: writes::Mutation = serde_json::from_value(json!({"operation":"create","calendarId":model::key(&["a","cal"]),"requestId":"0123456789abcdef0123456789abcdef","scope":"series","input":{"title":"Synthetic pending event","start":"2026-10-26T14:00:00Z","end":"2026-10-26T15:00:00Z","allDay":false,"timeZone":"UTC"}})).unwrap();
+    let (ready, started) = tokio::sync::oneshot::channel();
+    let write = async {
+        let _operation = google.operations.read().await;
+        ready.send(()).unwrap();
+        google.mutate(mutation).await.unwrap_err()
+    };
+    let change = async {
+        started.await.unwrap();
+        google
+            .set_credential_storage(CredentialStorage::LocalFile)
+            .await
+            .unwrap()
+    };
+    let (_, snapshot) = tokio::join!(write, change);
+    assert_eq!(snapshot["pendingMutations"], 1);
+    assert_eq!(snapshot["credentialStorage"], "local_file");
+    assert_eq!(snapshot["accounts"].as_array().unwrap().len(), 1);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn sign_in_and_failed_setting_saves_leave_the_current_credentials_intact() {
+    let (google, _, dir) = service();
+    *lock(&google.connecting).unwrap() = Some(Arc::new(Cancel::default()));
+    assert_eq!(
+        google
+            .set_credential_storage(CredentialStorage::LocalFile)
+            .await
+            .unwrap_err()
+            .code,
+        "BUSY"
+    );
+    *lock(&google.connecting).unwrap() = None;
+    let old = google.account_work("a").unwrap();
+    std::fs::remove_file(dir.0.join("google-credential-settings.json")).unwrap();
+    std::fs::create_dir(dir.0.join("google-credential-settings.json")).unwrap();
+    assert_eq!(
+        google
+            .set_credential_storage(CredentialStorage::LocalFile)
+            .await
+            .unwrap_err()
+            .code,
+        "CREDENTIAL_SETTINGS"
+    );
+    assert_eq!(google.secrets.mode().unwrap(), CredentialStorage::OsStore);
+    assert!(old.cancel.check().is_ok());
+    assert!(!lock(&google.access).unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn pagination_is_complete_and_partial_failure_preserves_cache() {
     let (mut google, _, _dir) = service();
@@ -479,7 +774,12 @@ async fn restart_recovers_a_receipt_by_reading_google_without_replaying_the_writ
         .unwrap();
     drop(google);
     let mut restored = Google::new(dir.0.clone()).unwrap();
-    restored.secrets = secrets;
+    restored.secrets = Credentials::with_stores(
+        &dir.0,
+        Arc::new(credentials::FileSecrets::new(dir.0.clone())),
+        secrets,
+    )
+    .unwrap();
     lock(&restored.access).unwrap().insert(
         "a".into(),
         Access {

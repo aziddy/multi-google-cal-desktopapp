@@ -652,15 +652,18 @@ impl Google {
 }
 #[tauri::command]
 pub async fn google_mutate(google: State<'_, Arc<Google>>, mutation: Mutation) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.mutate(mutation).await
 }
 #[tauri::command]
 pub async fn google_series(google: State<'_, Arc<Google>>, event_id: String) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.series(&event_id).await
 }
 
 #[tauri::command]
 pub async fn google_recover_pending(google: State<'_, Arc<Google>>) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.recover_pending().await
 }
 #[tauri::command]
@@ -668,6 +671,7 @@ pub async fn google_retry_pending(
     google: State<'_, Arc<Google>>,
     request_id: String,
 ) -> Result<Value> {
+    let _operation = google.operations.read().await;
     google.retry_pending(&request_id).await
 }
 

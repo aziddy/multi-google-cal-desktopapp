@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import type { GoogleSnapshot } from '../src/data/googleRepository'
+import type { CredentialStorage, GoogleSnapshot } from '../src/data/googleRepository'
 import type { CalendarEvent } from '../src/domain/types'
 
 const account = {
@@ -41,8 +41,10 @@ async function nativePreview(
   events: CalendarEvent[] = [event],
   connected = true,
   credentialBlocked = false,
+  options: { storage?: CredentialStorage; connecting?: boolean } = {},
 ) {
   const snapshot: GoogleSnapshot = {
+    credentialStorage: options.storage ?? (credentialBlocked ? 'os_store' : 'local_file'),
     client: connected
       ? { clientId: 'test.apps.googleusercontent.com', projectId: 'test-project' }
       : null,
@@ -68,12 +70,16 @@ async function nativePreview(
           },
         ]
       : [],
-    connecting: false,
+    connecting: options.connecting ?? false,
     pendingMutations: 0,
   }
   await page.addInitScript(
     ({ initial, account, calendar, events }) => {
       const snapshot = initial
+      const storageKey = '__test_google_credential_storage'
+      const savedStorage = sessionStorage.getItem(storageKey)
+      if (savedStorage === 'local_file' || savedStorage === 'os_store')
+        snapshot.credentialStorage = savedStorage
       let preferences = JSON.stringify({
         version: 0,
         state: {
@@ -99,6 +105,28 @@ async function nativePreview(
               return null
             }
             if (command.startsWith('plugin:')) return null
+            if (command === 'google_set_credential_storage') {
+              const control = window as unknown as {
+                __failStorageChange?: boolean
+                __holdStorageChange?: boolean
+                __finishStorageChange?: () => void
+              }
+              if (control.__failStorageChange)
+                throw {
+                  code: 'CREDENTIAL_SETTINGS',
+                  message: 'Credential storage settings could not be saved.',
+                }
+              if (control.__holdStorageChange)
+                await new Promise<void>((resolve) => {
+                  control.__finishStorageChange = resolve
+                })
+              snapshot.credentialStorage = args.storage as CredentialStorage
+              sessionStorage.setItem(storageKey, snapshot.credentialStorage)
+              snapshot.accounts.forEach((account) => {
+                account.connectionStatus =
+                  snapshot.credentialStorage === 'local_file' ? 'connected' : 'reconnect_required'
+              })
+            }
             if (command === 'google_import_client')
               snapshot.client = {
                 clientId: 'test.apps.googleusercontent.com',
@@ -245,4 +273,89 @@ test('locked credentials require an explicit Settings retry', async ({ page }) =
   await dialog.getByRole('button', { name: 'Retry credential access' }).click()
   await expect(dialog.getByText('Connected', { exact: true })).toBeVisible()
   expect(await attempts()).toBe(1)
+})
+
+test('credential storage defaults to local files and switches immediately without losing cached events', async ({
+  page,
+}) => {
+  await nativePreview(page)
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  let dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+  const storage = () => dialog.getByRole('combobox', { name: 'Credential storage' })
+  await expect(storage()).toHaveValue('local_file')
+  await expect(dialog.getByText(/saved unencrypted in a local file/)).toBeVisible()
+  await storage().selectOption('os_store')
+  await expect(storage()).toHaveValue('os_store')
+  await expect(dialog.getByText('Reconnect required', { exact: true })).toBeVisible()
+  await expect(dialog.getByText(/Refresh tokens are saved in macOS Keychain/)).toBeVisible()
+  expect(
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __googleCalls: { command: string; args: Record<string, unknown> }[]
+        }
+      ).__googleCalls.find((call) => call.command === 'google_set_credential_storage'),
+    ),
+  ).toEqual({ command: 'google_set_credential_storage', args: { storage: 'os_store' } })
+  await page.getByRole('button', { name: 'Close settings' }).click()
+  await expect(page.locator('[data-event-id="google:a:cal:one"]')).toBeVisible()
+  await page.reload()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await expect(storage()).toHaveValue('os_store')
+  await storage().selectOption('local_file')
+  await expect(storage()).toHaveValue('local_file')
+  await expect(dialog.getByText('Connected', { exact: true })).toBeVisible()
+  await expect(
+    dialog.getByText(/credentials in the inactive store are left untouched/),
+  ).toBeVisible()
+})
+
+test('failed credential setting saves retain the current selection and sign-in', async ({
+  page,
+}) => {
+  await nativePreview(page)
+  await page.evaluate(() => Object.assign(window, { __failStorageChange: true }))
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+  const storage = dialog.getByRole('combobox', { name: 'Credential storage' })
+  await storage.selectOption('os_store')
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'Credential storage settings could not be saved.',
+  )
+  await expect(storage).toHaveValue('local_file')
+  await expect(storage).toBeEnabled()
+  await expect(dialog.getByText('Connected', { exact: true })).toBeVisible()
+})
+
+test('credential changes show their pending state until active operations finish', async ({
+  page,
+}) => {
+  await nativePreview(page)
+  await page.evaluate(() => Object.assign(window, { __holdStorageChange: true }))
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+  const storage = dialog.getByRole('combobox', { name: 'Credential storage' })
+  await storage.selectOption('os_store')
+  await expect(storage).toBeDisabled()
+  await expect(dialog.getByText('Waiting for current Google operations to finish…')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Reconnect', exact: true })).toBeDisabled()
+  await page.waitForFunction(
+    () =>
+      typeof (window as unknown as { __finishStorageChange?: () => void }).__finishStorageChange ===
+      'function',
+  )
+  await page.evaluate(() =>
+    (window as unknown as { __finishStorageChange: () => void }).__finishStorageChange(),
+  )
+  await expect(storage).toHaveValue('os_store')
+  await expect(storage).toBeEnabled()
+})
+
+test('credential storage cannot change while Google sign-in is pending', async ({ page }) => {
+  await nativePreview(page, [event], true, false, { connecting: true })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await expect(dialog.getByRole('combobox', { name: 'Credential storage' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Cancel connection' })).toBeVisible()
 })

@@ -21,6 +21,10 @@ client_secret*.json
 google-desktop-client.json
 google-client.json
 google-cache.sqlite3*
+google-refresh-tokens.json
+google-refresh-tokens.lock
+google-credential-settings.json
+.google-credentials-*.tmp
 
 # Editor and operating-system files
 .DS_Store

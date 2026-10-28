@@ -3,7 +3,7 @@ import type { CalendarEvent, EventInput } from '../domain/types'
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: bridge.invoke }))
-import { changedFields, GoogleRepository } from './googleRepository'
+import { changedFields, GoogleRepository, type GoogleSnapshot } from './googleRepository'
 
 const event: CalendarEvent = {
   id: 'google:event',
@@ -35,6 +35,50 @@ function input(overrides: Partial<EventInput> = {}): EventInput {
   }
 }
 describe('Google repository boundary', () => {
+  it('changes credential storage without exposing tokens and rejects stale snapshots', async () => {
+    const original: GoogleSnapshot = {
+      credentialStorage: 'local_file',
+      client: null,
+      accounts: [],
+      calendars: [],
+      events: [],
+      syncStatus: [],
+      connecting: false,
+      pendingMutations: 0,
+    }
+    const updated: GoogleSnapshot = { ...original, credentialStorage: 'os_store' }
+    let finishSnapshot!: (snapshot: GoogleSnapshot) => void
+    bridge.invoke
+      .mockImplementationOnce(
+        () =>
+          new Promise<GoogleSnapshot>((resolve) => {
+            finishSnapshot = resolve
+          }),
+      )
+      .mockResolvedValueOnce(updated)
+      .mockResolvedValueOnce(updated)
+    const repo = new GoogleRepository()
+    const snapshot = repo.snapshot()
+    await expect(repo.setCredentialStorage('os_store')).resolves.toEqual(updated)
+    expect(bridge.invoke).toHaveBeenNthCalledWith(2, 'google_set_credential_storage', {
+      storage: 'os_store',
+    })
+    finishSnapshot(original)
+    await expect(snapshot).resolves.toEqual(updated)
+    expect(bridge.invoke).toHaveBeenLastCalledWith('google_snapshot', undefined)
+  })
+
+  it('preserves actionable native credential-settings errors', async () => {
+    bridge.invoke.mockRejectedValueOnce({
+      code: 'CREDENTIAL_SETTINGS',
+      message: 'Credential storage settings could not be saved.',
+    })
+    await expect(new GoogleRepository().setCredentialStorage('local_file')).rejects.toMatchObject({
+      code: 'CREDENTIAL_SETTINGS',
+      message: 'Credential storage settings could not be saved.',
+    })
+  })
+
   it('preserves untouched fields and gives clearing an explicit null', () => {
     expect(changedFields(event, input({ title: 'Changed', location: undefined }))).toEqual({
       title: 'Changed',
