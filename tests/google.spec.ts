@@ -41,7 +41,12 @@ async function nativePreview(
   events: CalendarEvent[] = [event],
   connected = true,
   credentialBlocked = false,
-  options: { storage?: CredentialStorage; connecting?: boolean } = {},
+  options: {
+    storage?: CredentialStorage
+    connecting?: boolean
+    holdSync?: boolean
+    pendingMutations?: number
+  } = {},
 ) {
   const snapshot: GoogleSnapshot = {
     credentialStorage: options.storage ?? (credentialBlocked ? 'os_store' : 'local_file'),
@@ -71,11 +76,13 @@ async function nativePreview(
         ]
       : [],
     connecting: options.connecting ?? false,
-    pendingMutations: 0,
+    pendingMutations: options.pendingMutations ?? 0,
   }
   await page.addInitScript(
-    ({ initial, account, calendar, events }) => {
+    ({ initial, account, calendar, events, holdSync }) => {
       const snapshot = initial
+      let syncHeld = holdSync
+      const syncWaiters: (() => void)[] = []
       const storageKey = '__test_google_credential_storage'
       const savedStorage = sessionStorage.getItem(storageKey)
       if (savedStorage === 'local_file' || savedStorage === 'os_store')
@@ -95,6 +102,10 @@ async function nativePreview(
       Object.assign(window, {
         isTauri: true,
         __googleCalls: calls,
+        __finishGoogleSync: () => {
+          syncHeld = false
+          syncWaiters.splice(0).forEach((resolve) => resolve())
+        },
         __TAURI_INTERNALS__: {
           invoke: async (command: string, args: Record<string, unknown> = {}) => {
             calls.push({ command, args })
@@ -105,6 +116,11 @@ async function nativePreview(
               return null
             }
             if (command.startsWith('plugin:')) return null
+            if (command === 'google_sync') {
+              if (syncHeld) await new Promise<void>((resolve) => syncWaiters.push(resolve))
+              return null
+            }
+            if (command === 'google_recover_pending') snapshot.pendingMutations = 0
             if (command === 'google_set_credential_storage') {
               const control = window as unknown as {
                 __failStorageChange?: boolean
@@ -177,10 +193,80 @@ async function nativePreview(
         },
       })
     },
-    { initial: snapshot, account, calendar, events },
+    { initial: snapshot, account, calendar, events, holdSync: options.holdSync ?? false },
   )
   await page.goto('/')
 }
+
+test('large downloaded histories stay usable while Google sync is pending', async ({ page }) => {
+  const history = Array.from({ length: 3000 }, (_, index) => {
+    const day = new Date(Date.UTC(2024, 0, 1 + Math.floor(index / 8))).toISOString().slice(0, 10)
+    const hour = String(9 + (index % 8)).padStart(2, '0')
+    return {
+      ...event,
+      id: `historical-${index}`,
+      title: `Historical appointment ${index}`,
+      start: `${day}T${hour}:00:00Z`,
+      end: `${day}T${hour}:30:00Z`,
+    }
+  })
+  await nativePreview(page, [...history, event], true, false, { holdSync: true })
+  await expect(page.locator(`[data-event-id="${event.id}"]`)).toBeVisible()
+  await expect(page.getByText('Syncing visible dates…')).toBeVisible()
+
+  const monthSwitch = await page.evaluate(async () => {
+    const start = performance.now()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }))
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    return performance.now() - start
+  })
+  expect(monthSwitch).toBeLessThan(2000)
+  await expect(page.getByRole('region', { name: 'Month calendar', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Downloaded appointment/ })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('a')
+  await expect(page.getByRole('region', { name: 'Schedule calendar', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Search events', exact: true }).click()
+  await page
+    .getByRole('textbox', { name: 'Search events', exact: true })
+    .fill('Historical appointment 2999')
+  await expect(page.getByRole('button', { name: /Historical appointment 2999/ })).toBeVisible()
+
+  const counts = await page.evaluate(() => {
+    const calls = (window as unknown as { __googleCalls: { command: string }[] }).__googleCalls
+    return {
+      snapshots: calls.filter((call) => call.command === 'google_snapshot').length,
+      recoveries: calls.filter((call) => call.command === 'google_recover_pending').length,
+    }
+  })
+  expect(counts).toEqual({ snapshots: 1, recoveries: 0 })
+  await page.getByRole('checkbox', { name: 'Show Real calendar calendar' }).uncheck()
+  await page.evaluate(() =>
+    (window as unknown as { __finishGoogleSync: () => void }).__finishGoogleSync(),
+  )
+  await expect(page.getByText('Syncing visible dates…')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Refresh Google calendars' })).toBeEnabled()
+})
+
+test('pending write recovery runs once and is not repeated by view changes', async ({ page }) => {
+  await nativePreview(page, [event], true, false, { pendingMutations: 1 })
+  await expect(page.locator(`[data-event-id="${event.id}"]`)).toBeVisible()
+  await page.keyboard.press('m')
+  await expect(page.getByRole('region', { name: 'Month calendar', exact: true })).toBeVisible()
+  await page.keyboard.press('a')
+  await expect(page.getByRole('region', { name: 'Schedule calendar', exact: true })).toBeVisible()
+  const recoveries = await page.evaluate(
+    () =>
+      (window as unknown as { __googleCalls: { command: string }[] }).__googleCalls.filter(
+        (call) => call.command === 'google_recover_pending',
+      ).length,
+  )
+  expect(recoveries).toBe(1)
+})
 
 test('native settings import a client, connect a real account, and disconnect local data', async ({
   page,

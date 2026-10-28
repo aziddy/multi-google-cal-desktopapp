@@ -79,6 +79,18 @@ describe('Google repository boundary', () => {
     })
   })
 
+  it('syncs month buckets without requesting a full snapshot per calendar', async () => {
+    bridge.invoke.mockResolvedValueOnce(undefined)
+    const buckets = [{ startDate: '2026-10-01', endDate: '2026-11-01', timeZone: 'UTC' }]
+    await expect(new GoogleRepository().sync('calendar', buckets)).resolves.toBeUndefined()
+    expect(bridge.invoke).toHaveBeenLastCalledWith('google_sync', {
+      calendarId: 'calendar',
+      buckets,
+      refreshCalendars: false,
+      force: false,
+    })
+  })
+
   it('preserves untouched fields and gives clearing an explicit null', () => {
     expect(changedFields(event, input({ title: 'Changed', location: undefined }))).toEqual({
       title: 'Changed',

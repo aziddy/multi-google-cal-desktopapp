@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { Temporal } from '@js-temporal/polyfill'
 import { CalendarDays, ChevronRight, Plus } from 'lucide-react'
 import {
   addDays,
-  eventDates,
+  eventsByDate,
   formatDate,
   monthDays,
   moveEvent,
@@ -29,6 +29,10 @@ interface Props {
   onUpdate: (input: EventInput, id: string) => Promise<void>
 }
 
+interface ViewProps extends Props {
+  dailyEvents: Map<string, CalendarEvent[]>
+}
+
 const HOUR_HEIGHT = 64
 const weekday = (date: string, long = false) =>
   formatDate(date, { weekday: long ? 'long' : 'short' })
@@ -43,22 +47,27 @@ function colorFor(event: CalendarEvent, calendars: Calendar[]) {
 }
 
 export function CalendarCanvas(props: Props) {
-  if (props.view === 'month') return <MonthView {...props} />
-  if (props.view === 'schedule') return <ScheduleView {...props} />
-  return <TimeView key={`${props.view}:${props.timeZone}`} {...props} />
+  const { date, view, timeZone, events } = props
+  const dailyEvents = useMemo(
+    () => eventsByDate(events, viewRange(date, view, timeZone)),
+    [events, date, view, timeZone],
+  )
+  if (view === 'month') return <MonthView {...props} dailyEvents={dailyEvents} />
+  if (view === 'schedule') return <ScheduleView {...props} dailyEvents={dailyEvents} />
+  return <TimeView key={`${view}:${timeZone}`} {...props} dailyEvents={dailyEvents} />
 }
 
 function TimeView({
   view,
   date,
-  events,
+  dailyEvents,
   calendars,
   timeZone,
   onCreate,
   onSelect,
   onOpenDate,
   onUpdate,
-}: Props) {
+}: ViewProps) {
   const { startDate } = viewRange(date, view, timeZone)
   const days = Array.from({ length: view === 'day' ? 1 : 7 }, (_, index) =>
     addDays(startDate, index),
@@ -183,18 +192,15 @@ function TimeView({
     window.addEventListener('keydown', escape)
   }
 
-  const allDay = events.filter(
-    (event) => event.allDay && days.some((day) => eventDates(event, timeZone).includes(day)),
-  )
+  const allDay = [...new Set([...dailyEvents.values()].flat())].filter((event) => event.allDay)
   const allDayRows: { event: CalendarEvent; start: number; end: number; row: number }[] = []
   const occupied: number[][] = []
   allDay
     .sort((a, b) => a.start.localeCompare(b.start) || b.end.localeCompare(a.end))
     .forEach((event) => {
-      const covered = eventDates(event, timeZone)
-      const start = days.findIndex((day) => covered.includes(day))
+      const start = days.findIndex((day) => event.start <= day && event.end > day)
       let end = start
-      while (end + 1 < days.length && covered.includes(days[end + 1])) end++
+      while (end + 1 < days.length && event.end > days[end + 1]) end++
       let row = 0
       while (occupied[row]?.some((day) => day >= start && day <= end)) row++
       occupied[row] = [
@@ -291,13 +297,18 @@ function TimeView({
                   />
                 ))}
               </div>
-              {timedSegments(events, day, timeZone).map((segment) => {
+              {timedSegments(dailyEvents.get(day) ?? [], day, timeZone).map((segment) => {
                 const { event, startMinute, endMinute, column, columns } = segment
                 const height = Math.max(22, ((endMinute - startMinute) / 60) * HOUR_HEIGHT - 2)
                 const original = Temporal.Instant.from(event.start).toZonedDateTimeISO(timeZone)
                 const segmentOffset =
                   original.toPlainDate().until(Temporal.PlainDate.from(day)).days * 1440
-                const isTerminal = eventDates(event, timeZone).at(-1) === day
+                const isTerminal =
+                  Temporal.Instant.from(event.end)
+                    .subtract({ nanoseconds: 1 })
+                    .toZonedDateTimeISO(timeZone)
+                    .toPlainDate()
+                    .toString() === day
                 return (
                   <div
                     key={event.id}
@@ -406,7 +417,15 @@ function TimeView({
   )
 }
 
-function MonthView({ date, events, calendars, timeZone, onCreate, onSelect, onOpenDate }: Props) {
+function MonthView({
+  date,
+  dailyEvents,
+  calendars,
+  timeZone,
+  onCreate,
+  onSelect,
+  onOpenDate,
+}: ViewProps) {
   const gridRef = useRef<HTMLDivElement>(null)
   const [capacity, setCapacity] = useState(3)
   useEffect(() => {
@@ -429,9 +448,7 @@ function MonthView({ date, events, calendars, timeZone, onCreate, onSelect, onOp
       </div>
       <div className="month-grid" ref={gridRef}>
         {days.map((day) => {
-          const daily = events
-            .filter((event) => eventDates(event, timeZone).includes(day))
-            .sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.localeCompare(b.start))
+          const daily = dailyEvents.get(day) ?? []
           const visibleCount = daily.length > capacity ? Math.max(0, capacity - 1) : capacity
           return (
             <div
@@ -491,21 +508,19 @@ function MonthView({ date, events, calendars, timeZone, onCreate, onSelect, onOp
 
 function ScheduleView({
   date,
-  events,
+  dailyEvents,
   calendars,
   timeZone,
   onCreate,
   onSelect,
   onOpenDate,
-}: Props) {
+}: ViewProps) {
   const today = todayDate(timeZone)
   const days = Array.from({ length: 30 }, (_, index) => addDays(date, index))
   const populated = days
     .map((day) => ({
       day,
-      events: events
-        .filter((event) => eventDates(event, timeZone).includes(day))
-        .sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.localeCompare(b.start)),
+      events: dailyEvents.get(day) ?? [],
     }))
     .filter((group) => group.events.length)
   return (

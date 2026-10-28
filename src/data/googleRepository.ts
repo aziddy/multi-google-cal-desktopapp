@@ -144,7 +144,7 @@ export class GoogleRepository implements CalendarRepository {
     return result
   }
   sync(calendarId: string, buckets: DateRange[], force = false) {
-    return native<GoogleSnapshot>('google_sync', {
+    return native<void>('google_sync', {
       calendarId,
       buckets,
       refreshCalendars: false,

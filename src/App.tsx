@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -93,21 +93,21 @@ function App() {
     toggleSidebar,
   } = preferences
   const client = useQueryClient()
-  const accountsQuery = useQuery({
-    queryKey: [dataSource, 'accounts'],
-    queryFn: () => repository.listAccounts(),
+  const snapshotQuery = useQuery({
+    queryKey: [dataSource, 'snapshot'],
+    queryFn: async () => {
+      if (dataSource === 'google') return googleRepository.snapshot()
+      const [accounts, calendars, events] = await Promise.all([
+        repository.listAccounts(),
+        repository.listCalendars(),
+        repository.listEvents(),
+      ])
+      return { accounts, calendars, events }
+    },
   })
-  const calendarsQuery = useQuery({
-    queryKey: [dataSource, 'calendars', accountsQuery.data?.map((account) => account.id)],
-    queryFn: () => repository.listCalendars(),
-  })
-  const eventsQuery = useQuery({
-    queryKey: [dataSource, 'events', accountsQuery.data?.map((account) => account.id)],
-    queryFn: () => repository.listEvents(),
-  })
-  const accounts = accountsQuery.data ?? EMPTY_ACCOUNTS
-  const calendars = calendarsQuery.data ?? EMPTY_CALENDARS
-  const events = eventsQuery.data ?? EMPTY_EVENTS
+  const accounts = snapshotQuery.data?.accounts ?? EMPTY_ACCOUNTS
+  const calendars = snapshotQuery.data?.calendars ?? EMPTY_CALENDARS
+  const events = snapshotQuery.data?.events ?? EMPTY_EVENTS
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [selected, setSelected] = useState<CalendarEvent | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -119,7 +119,7 @@ function App() {
   const searchRef = useRef<HTMLInputElement>(null)
   const viewMenuRef = useRef<HTMLDivElement>(null)
   const today = todayDate(timeZone)
-  const range = viewRange(date, view, timeZone)
+  const range = useMemo(() => viewRange(date, view, timeZone), [date, view, timeZone])
   const google = useGoogleSync(dataSource === 'google', calendars, hiddenCalendarIds, range)
 
   useEffect(() => {
@@ -262,14 +262,21 @@ function App() {
   function createEvent(day = date, minute = 540, allDay = false) {
     setEditor({ date: day, minute, allDay })
   }
-  const visibleEvents = events.filter((event) => !hiddenCalendarIds.includes(event.calendarId))
-  const results = visibleEvents
-    .filter((event) =>
-      `${event.title} ${event.location ?? ''} ${event.description ?? ''}`
-        .toLowerCase()
-        .includes(search.toLowerCase().trim()),
-    )
-    .sort((a, b) => a.start.localeCompare(b.start))
+  const visibleEvents = useMemo(
+    () => events.filter((event) => !hiddenCalendarIds.includes(event.calendarId)),
+    [events, hiddenCalendarIds],
+  )
+  const results = useMemo(() => {
+    if (!searchOpen || !search.trim()) return EMPTY_EVENTS
+    const query = search.toLowerCase().trim()
+    return visibleEvents
+      .filter((event) =>
+        `${event.title} ${event.location ?? ''} ${event.description ?? ''}`
+          .toLowerCase()
+          .includes(query),
+      )
+      .sort((a, b) => a.start.localeCompare(b.start))
+  }, [visibleEvents, searchOpen, search])
   const multiDay = view === 'week' || view === '7days'
   const rangeEnd = addDays(range.endDate, -1)
   const heading =
@@ -281,8 +288,8 @@ function App() {
             ...(range.startDate.slice(0, 4) !== rangeEnd.slice(0, 4) && { year: 'numeric' }),
           })} – ${formatDate(rangeEnd, { month: 'short', year: 'numeric' })}`
         : formatDate(multiDay ? range.startDate : date, { month: 'long', year: 'numeric' })
-  const error = accountsQuery.error || calendarsQuery.error || eventsQuery.error
-  const loading = accountsQuery.isPending || calendarsQuery.isPending || eventsQuery.isPending
+  const error = snapshotQuery.error
+  const loading = snapshotQuery.isPending
 
   return (
     <div className="app-shell">

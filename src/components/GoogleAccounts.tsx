@@ -5,7 +5,7 @@ import { googleRepository, type CredentialStorage } from '../data/googleReposito
 export function GoogleAccounts() {
   const client = useQueryClient()
   const query = useQuery({
-    queryKey: ['google', 'connection'],
+    queryKey: ['google', 'snapshot'],
     queryFn: () => googleRepository.snapshot(),
   })
   const [pending, setPending] = useState('')
@@ -199,7 +199,7 @@ export function GoogleAccounts() {
             onClick={() =>
               void googleRepository
                 .cancelConnect()
-                .then(() => client.invalidateQueries({ queryKey: ['google', 'connection'] }))
+                .then(() => client.invalidateQueries({ queryKey: ['google', 'snapshot'] }))
             }
           >
             Cancel connection

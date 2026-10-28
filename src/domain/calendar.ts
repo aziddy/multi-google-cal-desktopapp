@@ -118,6 +118,61 @@ export function eventDates(event: CalendarEvent, timeZone = DEFAULT_TIME_ZONE): 
   return dates
 }
 
+/** Group only the visible dates, without expanding offscreen or long-running events. */
+export function eventsByDate(
+  events: CalendarEvent[],
+  range: DateRange,
+): Map<string, CalendarEvent[]> {
+  const first = Temporal.PlainDate.from(range.startDate)
+  const end = Temporal.PlainDate.from(range.endDate)
+  const rangeStart = first.toZonedDateTime(range.timeZone).toInstant()
+  const rangeEnd = end.toZonedDateTime(range.timeZone).toInstant()
+  const grouped = new Map<string, CalendarEvent[]>()
+  for (let day = first; Temporal.PlainDate.compare(day, end) < 0; day = day.add({ days: 1 }))
+    grouped.set(day.toString(), [])
+
+  for (const event of events) {
+    let startDate: string
+    let endDate: string
+    if (event.allDay) {
+      startDate = event.start < range.startDate ? range.startDate : event.start
+      endDate = event.end > range.endDate ? range.endDate : event.end
+    } else {
+      const start = Temporal.Instant.from(event.start)
+      if (Temporal.Instant.compare(start, rangeEnd) >= 0) continue
+      const finish = Temporal.Instant.from(event.end)
+      if (
+        Temporal.Instant.compare(finish, rangeStart) <= 0 ||
+        Temporal.Instant.compare(finish, start) <= 0
+      )
+        continue
+      startDate =
+        Temporal.Instant.compare(start, rangeStart) < 0
+          ? range.startDate
+          : start.toZonedDateTimeISO(range.timeZone).toPlainDate().toString()
+      endDate =
+        Temporal.Instant.compare(finish, rangeEnd) >= 0
+          ? range.endDate
+          : finish
+              .subtract({ nanoseconds: 1 })
+              .toZonedDateTimeISO(range.timeZone)
+              .toPlainDate()
+              .add({ days: 1 })
+              .toString()
+    }
+    if (startDate >= endDate) continue
+    for (
+      let day = Temporal.PlainDate.from(startDate);
+      day.toString() < endDate;
+      day = day.add({ days: 1 })
+    )
+      grouped.get(day.toString())?.push(event)
+  }
+  for (const daily of grouped.values())
+    daily.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.localeCompare(b.start))
+  return grouped
+}
+
 function minuteOfDay(date: Temporal.ZonedDateTime): number {
   return date.hour * 60 + date.minute + date.second / 60
 }

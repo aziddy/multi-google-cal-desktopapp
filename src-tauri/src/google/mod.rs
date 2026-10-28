@@ -695,7 +695,7 @@ impl Google {
         buckets: Vec<Bucket>,
         refresh_calendars: bool,
         force: bool,
-    ) -> Result<Value> {
+    ) -> Result<()> {
         let p = model::parts(calendar, 2)?;
         let (sub, cal) = (&p[0], &p[1]);
         if buckets.len() > 12 {
@@ -710,7 +710,7 @@ impl Google {
         if refresh_calendars {
             if let Err(error) = self.refresh_calendars(sub).await {
                 lock(&self.cache)?.sync_failure(sub, cal, &error.message)?;
-                return self.snapshot();
+                return Ok(());
             }
         }
         let mut failure = None;
@@ -762,7 +762,7 @@ impl Google {
                 )?;
             }
         }
-        self.snapshot()
+        Ok(())
     }
 }
 
@@ -816,7 +816,7 @@ pub async fn google_sync(
     buckets: Vec<Bucket>,
     refresh_calendars: bool,
     force: bool,
-) -> Result<Value> {
+) -> Result<()> {
     let _operation = google.operations.read().await;
     google
         .sync(&calendar_id, buckets, refresh_calendars, force)

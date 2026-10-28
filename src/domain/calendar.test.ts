@@ -5,6 +5,7 @@ import {
   addMonths,
   canChangeEvent,
   eventDates,
+  eventsByDate,
   formatDate,
   monthDays,
   moveEvent,
@@ -122,6 +123,65 @@ describe('exclusive event ranges', () => {
     expect(
       eventDates(event({ start: '2026-10-27T04:30:00Z', end: '2026-10-27T05:30:00Z' }), zone),
     ).toEqual(['2026-10-26', '2026-10-27'])
+  })
+})
+
+describe('visible event grouping', () => {
+  it.each([
+    ['2026-03-07', '2026-03-10', zone],
+    ['2026-10-31', '2026-11-03', zone],
+    ['2026-10-26', '2026-10-29', 'Pacific/Kiritimati'],
+  ])(
+    'preserves exclusive ends and local dates in %s through %s (%s)',
+    (startDate, endDate, timeZone) => {
+      const items = [
+        event({ id: 'all-day', start: startDate, end: endDate, allDay: true }),
+        event({ id: 'before', start: '2020-01-01T14:00:00Z', end: '2020-01-01T15:00:00Z' }),
+        event({ id: 'midnight', start: `${startDate}T00:00:00Z`, end: `${endDate}T00:00:00Z` }),
+        event({
+          id: 'local-midnight',
+          start: `${startDate}T14:00:00Z`,
+          end: `${endDate}T05:00:00Z`,
+        }),
+        event({
+          id: 'precision',
+          start: `${startDate}T10:00:00Z`,
+          end: `${startDate}T10:00:00.000000001Z`,
+        }),
+        event({ id: 'empty', start: `${startDate}T14:00:00Z`, end: `${startDate}T14:00:00Z` }),
+      ]
+      const grouped = eventsByDate(items, { startDate, endDate, timeZone })
+      expect([...grouped.keys()]).toEqual([startDate, addDays(startDate, 1), addDays(startDate, 2)])
+      for (const [day, daily] of grouped) {
+        const expected = items
+          .filter((item) => eventDates(item, timeZone).includes(day))
+          .sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.localeCompare(b.start))
+        expect(daily).toEqual(expected)
+      }
+      expect(items[0].id).toBe('all-day')
+      expect(items[4].end).toBe(`${startDate}T10:00:00.000000001Z`)
+    },
+  )
+
+  it('clips very long events to the visible dates and keeps empty dates in the index', () => {
+    const allDay = event({
+      id: 'long-all-day',
+      start: '1900-01-01',
+      end: '9999-12-31',
+      allDay: true,
+    })
+    const timed = event({
+      id: 'long-timed',
+      start: '1900-01-01T00:00:00Z',
+      end: '9999-12-31T00:00:00Z',
+    })
+    const range = { startDate: '2026-10-26', endDate: '2026-10-29', timeZone: zone }
+    expect([...eventsByDate([timed, allDay], range).values()]).toEqual([
+      [allDay, timed],
+      [allDay, timed],
+      [allDay, timed],
+    ])
+    expect([...eventsByDate([], range).values()]).toEqual([[], [], []])
   })
 })
 
