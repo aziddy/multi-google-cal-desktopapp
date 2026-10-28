@@ -40,224 +40,243 @@ export function GoogleAccounts() {
   const snapshot = query.data
   const connecting = pending === 'connect' || snapshot?.connecting
   return (
-    <section className="settings-section google-accounts">
-      <h3>Google accounts</h3>
-      <p className="settings-help">Connect using your own Google Cloud Desktop OAuth client.</p>
-      <label className="settings-label" htmlFor="google-credential-storage">
-        Credential storage
-      </label>
-      <select
-        id="google-credential-storage"
-        className="settings-zone-select"
-        value={snapshot?.credentialStorage ?? 'local_file'}
-        disabled={!snapshot || !!pending || !!connecting}
-        aria-describedby="google-credential-storage-help google-credential-storage-switch"
-        onChange={(e) => {
-          const storage = e.currentTarget.value as CredentialStorage
-          void run('storage', () => googleRepository.setCredentialStorage(storage))
-        }}
-      >
-        <option value="local_file">Local file (default)</option>
-        <option value="os_store">System credential store</option>
-      </select>
-      <p id="google-credential-storage-help" className="settings-help">
-        {snapshot?.credentialStorage === 'os_store'
-          ? 'Refresh tokens are saved in macOS Keychain, Windows credential storage, or Linux Secret Service. Credential access never opens password prompts on macOS.'
-          : 'Stay signed in across restarts. Refresh tokens are saved unencrypted in a local file restricted to your operating-system user. Local mode never accesses the system credential store.'}
-      </p>
-      <p id="google-credential-storage-switch" className="settings-help">
-        Changes apply after current Google operations finish, without restarting. Tokens are not
-        copied between stores; credentials in the inactive store are left untouched. Reconnect
-        accounts if the selected store has no saved token. Cached calendars stay available.
-      </p>
-      {pending === 'storage' && (
-        <p className="settings-help" role="status">
-          Waiting for current Google operations to finish…
+    <>
+      <section className="settings-section settings-storage" aria-labelledby="google-storage-label">
+        <label
+          id="google-storage-label"
+          className="settings-label"
+          htmlFor="google-credential-storage"
+        >
+          Credential storage
+        </label>
+        <select
+          id="google-credential-storage"
+          className="settings-zone-select"
+          value={snapshot?.credentialStorage ?? 'local_file'}
+          disabled={!snapshot || !!pending || !!connecting}
+          aria-describedby="google-credential-storage-help google-credential-storage-switch"
+          onChange={(e) => {
+            const storage = e.currentTarget.value as CredentialStorage
+            void run('storage', () => googleRepository.setCredentialStorage(storage))
+          }}
+        >
+          <option value="local_file">Local file (default)</option>
+          <option value="os_store">System credential store</option>
+        </select>
+        <p id="google-credential-storage-help" className="settings-help">
+          {snapshot?.credentialStorage === 'os_store'
+            ? 'Refresh tokens are saved in macOS Keychain, Windows credential storage, or Linux Secret Service. Credential access never opens password prompts on macOS.'
+            : 'Stay signed in across restarts. Refresh tokens are saved unencrypted in a local file restricted to your operating-system user. Local mode never accesses the system credential store.'}
         </p>
-      )}
-      <p className="settings-help">
-        {snapshot?.client
-          ? `OAuth project: ${snapshot.client.projectId}`
-          : 'Import a Desktop OAuth client JSON to get started.'}
-      </p>
-      <div className="button-row">
-        <button
-          className="secondary-button"
-          disabled={!!pending || !!snapshot?.accounts.length || !!connecting}
-          onClick={() => void run('import', () => googleRepository.importClient())}
-        >
-          Import OAuth JSON
-        </button>
-        {!snapshot?.client && (
-          <button
-            className="secondary-button"
-            disabled={!!pending}
-            onClick={() => void run('import', () => googleRepository.importClient(true))}
-          >
-            Use saved client
-          </button>
+        <p id="google-credential-storage-switch" className="settings-help">
+          Changes apply after current Google operations finish, without restarting. Tokens are not
+          copied between stores; credentials in the inactive store are left untouched. Reconnect
+          accounts if the selected store has no saved token. Cached calendars stay available.
+        </p>
+        {pending === 'storage' && (
+          <p className="settings-help" role="status">
+            Waiting for current Google operations to finish…
+          </p>
         )}
-      </div>
-      {!!snapshot?.accounts.length && (
-        <p className="settings-help">Disconnect all accounts before replacing the OAuth client.</p>
-      )}
-      <div className="google-account-list">
-        {snapshot?.accounts.map((account) => (
-          <div className="google-account-row" key={account.id}>
-            <strong>{account.name}</strong>
-            <span>{account.email}</span>
-            <small>
-              {account.connectionStatus === 'connected'
-                ? 'Connected'
-                : account.connectionStatus === 'reconnect_required'
-                  ? 'Reconnect required'
-                  : account.connectionStatus === 'credential_access_required'
-                    ? 'Credential access required'
-                    : 'Calendar list needs a refresh'}
-            </small>
-            <div className="button-row">
-              {account.connectionStatus === 'credential_access_required' && (
-                <button
-                  className="dialog-text-button"
-                  disabled={!!pending}
-                  onClick={() =>
-                    void run('credentials', () => googleRepository.retryCredentials(account.id))
-                  }
-                >
-                  Retry credential access
-                </button>
-              )}
-              <button
-                className="dialog-text-button"
-                disabled={!!pending}
-                onClick={() => void run('connect', () => googleRepository.connect(account.id))}
-              >
-                Reconnect
-              </button>
-              {disconnect === account.id ? (
-                <>
-                  <button
-                    className="dialog-danger-button"
-                    disabled={!!pending}
-                    onClick={() =>
-                      void run('disconnect', () => googleRepository.disconnect(account.id))
-                    }
-                  >
-                    Remove local account
-                  </button>
-                  <button className="dialog-text-button" onClick={() => setDisconnect('')}>
-                    Keep account
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="dialog-text-button"
-                  disabled={!!pending}
-                  onClick={() => setDisconnect(account.id)}
-                >
-                  Disconnect
-                </button>
-              )}
-            </div>
-            {!!snapshot?.calendars.length && (
-              <details className="settings-sync-details">
-                <summary>Calendar sync status</summary>
-                {snapshot.syncStatus.map((status) => (
-                  <div className="google-account-row" key={status.calendarId}>
-                    <strong>
-                      {snapshot.calendars.find((cal) => cal.id === status.calendarId)?.name ??
-                        'Calendar'}
-                    </strong>
-                    <small>
-                      {status.lastSuccess
-                        ? `Last refreshed ${new Date(status.lastSuccess * 1000).toLocaleString()}`
-                        : 'No dates downloaded yet'}{' '}
-                      · {status.coverage.filter((bucket) => bucket.complete).length} complete
-                      month(s)
-                    </small>
-                    {status.error && <small>{status.error}</small>}
-                  </div>
-                ))}
-              </details>
-            )}
-            {disconnect === account.id && (
-              <p className="settings-help">
-                Removes credentials and cached calendars from this device. Google events and the
-                project’s Google grant remain in place.
-              </p>
-            )}
-          </div>
-        ))}
-      </div>
-      {connecting ? (
-        <div>
-          <p role="status">
-            Complete sign-in in your system browser. This expires after five minutes.
-          </p>
-          <button
-            className="secondary-button"
-            onClick={() =>
-              void googleRepository
-                .cancelConnect()
-                .then(() => client.invalidateQueries({ queryKey: ['google', 'snapshot'] }))
-            }
-          >
-            Cancel connection
-          </button>
-        </div>
-      ) : (
-        <button
-          className="primary-button"
-          disabled={!!pending || !snapshot?.client}
-          onClick={() => void run('connect', () => googleRepository.connect())}
-        >
-          Connect another Google account
-        </button>
-      )}
-      {!!snapshot?.pendingMutations && (
-        <div>
+      </section>
+      <section className="settings-section google-accounts" aria-labelledby="google-accounts-title">
+        <h3 id="google-accounts-title">Google accounts</h3>
+        <p className="settings-help">Connect using your own Google Cloud Desktop OAuth client.</p>
+        <div className="google-client-settings">
           <p className="settings-help">
-            A previous write needs reconciliation. Check it before creating another copy.
+            {snapshot?.client
+              ? `OAuth project: ${snapshot.client.projectId}`
+              : 'Import a Desktop OAuth client JSON to get started.'}
           </p>
-          <button
-            className="dialog-text-button"
-            disabled={!!pending}
-            onClick={() => void run('recover', () => googleRepository.recoverPending())}
-          >
-            Reconcile previous writes
-          </button>
-          {snapshot.pendingWrites?.map((receipt) => (
-            <div className="google-account-row" key={receipt.requestId}>
-              <span>
-                {receipt.title} · {receipt.operation}
-              </span>
+          <div className="button-row">
+            <button
+              className="secondary-button"
+              disabled={!!pending || !!snapshot?.accounts.length || !!connecting}
+              onClick={() => void run('import', () => googleRepository.importClient())}
+            >
+              Import OAuth JSON
+            </button>
+            {!snapshot?.client && (
               <button
                 className="secondary-button"
                 disabled={!!pending}
-                onClick={() =>
-                  void run('recover', () => googleRepository.retryPending(receipt.requestId))
-                }
+                onClick={() => void run('import', () => googleRepository.importClient(true))}
               >
-                Retry original attempt
+                Use saved client
               </button>
+            )}
+          </div>
+          {!!snapshot?.accounts.length && (
+            <p className="settings-help">
+              Disconnect all accounts before replacing the OAuth client.
+            </p>
+          )}
+        </div>
+        <div className="google-account-list">
+          {snapshot?.accounts.map((account) => (
+            <div
+              className="google-account-row"
+              key={account.id}
+              role="group"
+              aria-label={account.email}
+            >
+              <div className="google-account-heading">
+                <strong>{account.name}</strong>
+                <span className="google-account-status">
+                  {account.connectionStatus === 'connected'
+                    ? 'Connected'
+                    : account.connectionStatus === 'reconnect_required'
+                      ? 'Reconnect required'
+                      : account.connectionStatus === 'credential_access_required'
+                        ? 'Credential access required'
+                        : 'Calendar list needs a refresh'}
+                </span>
+              </div>
+              <span>{account.email}</span>
+              <div className="button-row">
+                {account.connectionStatus === 'credential_access_required' && (
+                  <button
+                    className="dialog-text-button"
+                    disabled={!!pending}
+                    onClick={() =>
+                      void run('credentials', () => googleRepository.retryCredentials(account.id))
+                    }
+                  >
+                    Retry credential access
+                  </button>
+                )}
+                <button
+                  className="dialog-text-button"
+                  disabled={!!pending}
+                  onClick={() => void run('connect', () => googleRepository.connect(account.id))}
+                >
+                  Reconnect
+                </button>
+                {disconnect === account.id ? (
+                  <>
+                    <button
+                      className="dialog-danger-button"
+                      disabled={!!pending}
+                      onClick={() =>
+                        void run('disconnect', () => googleRepository.disconnect(account.id))
+                      }
+                    >
+                      Remove local account
+                    </button>
+                    <button className="dialog-text-button" onClick={() => setDisconnect('')}>
+                      Keep account
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="dialog-text-button"
+                    disabled={!!pending}
+                    onClick={() => setDisconnect(account.id)}
+                  >
+                    Disconnect
+                  </button>
+                )}
+              </div>
+              {!!snapshot?.calendars.length && (
+                <details className="settings-sync-details">
+                  <summary>Calendar sync status</summary>
+                  {snapshot.syncStatus.map((status) => (
+                    <div className="google-account-row" key={status.calendarId}>
+                      <strong>
+                        {snapshot.calendars.find((cal) => cal.id === status.calendarId)?.name ??
+                          'Calendar'}
+                      </strong>
+                      <small>
+                        {status.lastSuccess
+                          ? `Last refreshed ${new Date(status.lastSuccess * 1000).toLocaleString()}`
+                          : 'No dates downloaded yet'}{' '}
+                        · {status.coverage.filter((bucket) => bucket.complete).length} complete
+                        month(s)
+                      </small>
+                      {status.error && <small>{status.error}</small>}
+                    </div>
+                  ))}
+                </details>
+              )}
+              {disconnect === account.id && (
+                <p className="settings-help">
+                  Removes credentials and cached calendars from this device. Google events and the
+                  project’s Google grant remain in place.
+                </p>
+              )}
             </div>
           ))}
         </div>
-      )}
-      {(error || query.error) && (
-        <p className="dialog-error" role="alert">
-          {error || query.error?.message}
+        {connecting ? (
+          <div>
+            <p role="status">
+              Complete sign-in in your system browser. This expires after five minutes.
+            </p>
+            <button
+              className="secondary-button"
+              onClick={() =>
+                void googleRepository
+                  .cancelConnect()
+                  .then(() => client.invalidateQueries({ queryKey: ['google', 'snapshot'] }))
+              }
+            >
+              Cancel connection
+            </button>
+          </div>
+        ) : (
+          <button
+            className="primary-button"
+            disabled={!!pending || !snapshot?.client}
+            onClick={() => void run('connect', () => googleRepository.connect())}
+          >
+            Connect another Google account
+          </button>
+        )}
+        {!!snapshot?.pendingMutations && (
+          <div>
+            <p className="settings-help">
+              A previous write needs reconciliation. Check it before creating another copy.
+            </p>
+            <button
+              className="dialog-text-button"
+              disabled={!!pending}
+              onClick={() => void run('recover', () => googleRepository.recoverPending())}
+            >
+              Reconcile previous writes
+            </button>
+            {snapshot.pendingWrites?.map((receipt) => (
+              <div className="google-account-row" key={receipt.requestId}>
+                <span>
+                  {receipt.title} · {receipt.operation}
+                </span>
+                <button
+                  className="secondary-button"
+                  disabled={!!pending}
+                  onClick={() =>
+                    void run('recover', () => googleRepository.retryPending(receipt.requestId))
+                  }
+                >
+                  Retry original attempt
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {(error || query.error) && (
+          <p className="dialog-error" role="alert">
+            {error || query.error?.message}
+          </p>
+        )}
+        {message && (
+          <p className="settings-help" role="status">
+            {message}
+          </p>
+        )}
+        <p className="settings-help">
+          Search covers downloaded dates. Cached events remain available offline; creating and
+          editing require a connection.
         </p>
-      )}
-      {message && (
-        <p className="settings-help" role="status">
-          {message}
-        </p>
-      )}
-      <p className="settings-help">
-        Search covers downloaded dates. Cached events remain available offline; creating and editing
-        require a connection.
-      </p>
-    </section>
+      </section>
+    </>
   )
 }

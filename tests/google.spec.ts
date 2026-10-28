@@ -46,6 +46,7 @@ async function nativePreview(
     connecting?: boolean
     holdSync?: boolean
     pendingMutations?: number
+    accounts?: GoogleSnapshot['accounts']
   } = {},
 ) {
   const snapshot: GoogleSnapshot = {
@@ -54,12 +55,12 @@ async function nativePreview(
       ? { clientId: 'test.apps.googleusercontent.com', projectId: 'test-project' }
       : null,
     accounts: connected
-      ? [
+      ? (options.accounts ?? [
           {
             ...account,
             connectionStatus: credentialBlocked ? 'credential_access_required' : 'connected',
           },
-        ]
+        ])
       : [],
     calendars: connected ? [calendar] : [],
     events: connected ? events : [],
@@ -198,6 +199,113 @@ async function nativePreview(
   await page.goto('/')
 }
 
+for (const theme of ['Light', 'Dark'] as const) {
+  test(`two-account settings fit in a compact two-column dialog in ${theme.toLowerCase()} mode`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 960 })
+    await nativePreview(page, [event], true, false, {
+      accounts: [
+        account,
+        { ...account, id: 'google:b', name: 'Demo Work', email: 'work@example.test' },
+      ],
+    })
+    const trigger = page.getByRole('button', { name: 'Settings', exact: true })
+    await trigger.click()
+    const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+    await dialog.getByRole('button', { name: theme, exact: true }).click()
+    await page.evaluate(() => document.fonts.ready)
+
+    const bounds = await dialog.boundingBox()
+    expect(bounds!.width).toBe(920)
+    expect(bounds!.height).toBeLessThanOrEqual(680)
+    const storage = await dialog.getByRole('region', { name: 'Credential storage' }).boundingBox()
+    const accounts = await dialog.getByRole('region', { name: 'Google accounts' }).boundingBox()
+    expect(accounts!.x).toBeGreaterThan(storage!.x + storage!.width)
+    expect(accounts!.y).toBeLessThan(storage!.y)
+    expect(
+      await dialog.locator('.settings-body').evaluate((body) => ({
+        vertical: body.scrollHeight > body.clientHeight + 1,
+        horizontal: body.scrollWidth > body.clientWidth,
+      })),
+    ).toEqual({ vertical: false, horizontal: false })
+    await expect(dialog.getByText(/saved unencrypted in a local file/)).toBeInViewport()
+    await expect(
+      dialog.getByText(/credentials in the inactive store are left untouched/),
+    ).toBeInViewport()
+    await expect(
+      dialog.getByRole('button', { name: 'Connect another Google account' }),
+    ).toBeInViewport()
+    await expect(dialog.getByRole('group', { name: 'work@example.test' })).toBeInViewport()
+
+    const path = testInfo.outputPath(`settings-${theme.toLowerCase()}.png`)
+    await dialog.screenshot({ path, animations: 'disabled' })
+    await testInfo.attach(`Settings ${theme}`, { path, contentType: 'image/png' })
+
+    await dialog.getByRole('button', { name: 'Close settings' }).focus()
+    await page.keyboard.press('Shift+Tab')
+    await expect(
+      dialog.getByRole('button', { name: 'Connect another Google account' }),
+    ).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(dialog.getByRole('button', { name: 'Close settings' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(dialog).not.toBeVisible()
+    await expect(trigger).toBeFocused()
+  })
+}
+
+test('settings scroll long account lists without moving the header or overflowing at minimum size', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 860, height: 620 })
+  const accounts = Array.from({ length: 8 }, (_, index) => ({
+    ...account,
+    id: `google:demo-${index}`,
+    name: `Demo User ${index + 1} With A Long Display Name For Layout Testing`,
+    email: `demo-${index + 1}.with.a.long.email.address.for.layout.testing@example.test`,
+  }))
+  await nativePreview(page, [event], true, false, { accounts })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+  const close = dialog.getByRole('button', { name: 'Close settings' })
+  const footer = dialog.locator('.settings-about')
+  const closeBefore = await close.boundingBox()
+  const footerBefore = await footer.boundingBox()
+  const lastAccount = dialog.getByRole('group', { name: accounts.at(-1)!.email })
+  await lastAccount.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  const remove = lastAccount.getByRole('button', { name: 'Remove local account' })
+  await remove.scrollIntoViewIfNeeded()
+  await expect(remove).toBeInViewport()
+  await expect(lastAccount.getByText(/Removes credentials and cached calendars/)).toBeVisible()
+  await lastAccount.locator('summary').focus()
+  await page.keyboard.press('Enter')
+  await expect(lastAccount.getByText(/No dates downloaded yet/)).toBeVisible()
+  await dialog
+    .getByRole('button', { name: 'Connect another Google account' })
+    .scrollIntoViewIfNeeded()
+
+  expect(await close.boundingBox()).toEqual(closeBefore)
+  expect(await footer.boundingBox()).toEqual(footerBefore)
+  const bounds = await dialog.boundingBox()
+  expect(bounds!.x).toBeGreaterThanOrEqual(16)
+  expect(bounds!.y).toBeGreaterThanOrEqual(24)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(844)
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(596)
+  expect(await dialog.evaluate((element) => element.scrollTop)).toBe(0)
+  expect(
+    await dialog.locator('.settings-body').evaluate((body) => ({
+      scrolled: body.scrollTop > 0,
+      horizontal: body.scrollWidth > body.clientWidth,
+    })),
+  ).toEqual({ scrolled: true, horizontal: false })
+  const path = testInfo.outputPath('settings-compact.png')
+  await dialog.screenshot({ path, animations: 'disabled' })
+  await testInfo.attach('Settings compact', { path, contentType: 'image/png' })
+  await close.click()
+  await expect(dialog).not.toBeVisible()
+})
+
 test('large downloaded histories stay usable while Google sync is pending', async ({ page }) => {
   const history = Array.from({ length: 3000 }, (_, index) => {
     const day = new Date(Date.UTC(2024, 0, 1 + Math.floor(index / 8))).toISOString().slice(0, 10)
@@ -271,6 +379,7 @@ test('pending write recovery runs once and is not repeated by view changes', asy
 test('native settings import a client, connect a real account, and disconnect local data', async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 860, height: 620 })
   await nativePreview(page, [event], false)
   await page.getByRole('button', { name: 'Connect Google account', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })

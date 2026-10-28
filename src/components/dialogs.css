@@ -322,29 +322,132 @@
   padding: 8px 12px;
 }
 .settings-dialog {
-  padding: 22px 28px 24px;
-  width: min(490px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  padding: 22px 26px 18px;
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - 48px));
+  overflow: hidden;
+}
+.settings-header {
+  flex-shrink: 0;
+  padding-bottom: 20px;
+}
+.settings-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  margin: -4px;
+}
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    'general accounts'
+    'storage accounts';
+  align-items: start;
+  gap: 22px 24px;
+}
+.settings-general {
+  grid-area: general;
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+.settings-grid-demo {
+  grid-template-rows: auto;
+  grid-template-areas: 'general accounts';
+}
+.settings-storage {
+  grid-area: storage;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.google-accounts,
+.settings-demo-pane {
+  grid-area: accounts;
+  min-width: 0;
+  align-self: stretch;
+  border-left: 1px solid var(--border);
+  padding-left: 24px;
+}
+.google-client-settings {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.google-client-settings .settings-help {
+  margin: 0;
 }
 .google-accounts .button-row {
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
+}
+.google-accounts .dialog-text-button,
+.google-accounts .dialog-danger-button {
+  padding: 7px 10px;
+  min-height: 34px;
+  font-size: 12px !important;
+}
+.google-accounts .primary-button,
+.google-accounts .secondary-button {
+  max-width: 100%;
+  padding: 8px 16px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .google-account-list {
   display: grid;
-  gap: 12px;
-  margin: 16px 0;
+  gap: 8px;
+  margin: 12px 0;
 }
 .google-account-row {
   display: grid;
   gap: 4px;
+  min-width: 0;
   border: 1px solid var(--border);
-  padding: 12px;
+  padding: 10px;
   border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.google-account-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.google-account-heading strong {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-size: 13px;
+}
+.google-account-status {
+  color: var(--muted);
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
 }
 .google-account-row > span,
 .google-account-row > small {
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.settings-sync-details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.settings-sync-details summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.settings-sync-details .google-account-row {
+  margin-top: 8px;
 }
 .schedule-fields,
 .recurrence-controls {
@@ -400,32 +503,34 @@
 .settings-subtitle {
   font-size: 13px;
   color: var(--muted);
-  margin: 0 0 28px;
+  margin: 0;
 }
 .settings-section {
-  margin: 0 0 24px;
+  min-width: 0;
+  margin: 0;
 }
 .settings-section h3,
 .settings-label {
   font-size: 12px;
   font-weight: 600;
-  margin: 0 0 11px;
+  margin: 0 0 10px;
   display: block;
 }
 .theme-options {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 .theme-option {
   position: relative;
   display: flex;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 9px;
-  border-radius: 12px;
-  padding: 18px 12px 14px;
+  gap: 7px;
+  min-width: 0;
+  min-height: 46px;
+  border-radius: 9px;
+  padding: 10px 12px;
   background: var(--surface);
   color: var(--muted);
   border: 1px solid var(--border);
@@ -441,31 +546,38 @@
 }
 .theme-option-check {
   position: absolute;
-  right: 9px;
-  top: 8px;
+  right: 4px;
+  top: 4px;
 }
 .settings-zone-select {
   border-radius: 8px;
   border: 1px solid var(--border);
   width: 100%;
-  padding: 11px 12px;
+  min-height: 38px;
+  padding: 8px 10px;
   background: var(--surface);
   font-size: 13px !important;
 }
 .settings-help {
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.55;
   margin: 7px 0 0;
+  overflow-wrap: anywhere;
+}
+.settings-demo-pane {
+  display: grid;
+  align-content: start;
+  gap: 22px;
 }
 .settings-demo-card {
   display: flex;
   gap: 15px;
-  padding: 18px;
+  padding: 16px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  margin: 0 0 25px;
+  margin: 0;
 }
 .settings-demo-icon {
   color: var(--primary);
@@ -527,12 +639,14 @@
   gap: 4px;
 }
 .settings-about {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 5px 10px;
   border-top: 1px solid var(--border);
-  padding-top: 16px;
+  margin-top: 20px;
+  padding-top: 12px;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
@@ -557,6 +671,27 @@
   to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
+  }
+}
+@media (max-width: 799px) {
+  .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas:
+      'general'
+      'storage'
+      'accounts';
+  }
+  .settings-grid-demo {
+    grid-template-areas:
+      'general'
+      'accounts';
+  }
+  .google-accounts,
+  .settings-demo-pane {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 18px 0 0;
   }
 }
 @media (max-width: 520px) {

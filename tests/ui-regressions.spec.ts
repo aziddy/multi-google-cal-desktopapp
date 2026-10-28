@@ -143,3 +143,27 @@ test('preference quota failures show an alert and recover through retry', async 
   expect(saved).toBe('dark')
   expect(errors).toEqual([])
 })
+
+test('demo settings stack in narrow windows and keep reset controls reachable', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 760, height: 620 })
+  await seed(page)
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+  const general = await dialog.locator('.settings-general').boundingBox()
+  const demo = await dialog.locator('.settings-demo-pane').boundingBox()
+  expect(demo!.y).toBeGreaterThan(general!.y + general!.height)
+  expect(demo!.x).toBe(general!.x)
+  expect(
+    await dialog.locator('.settings-body').evaluate((body) => body.scrollWidth > body.clientWidth),
+  ).toBe(false)
+  await dialog.getByRole('button', { name: 'Reset demo data' }).click()
+  const cancel = dialog.getByRole('button', { name: 'Cancel', exact: true })
+  await cancel.scrollIntoViewIfNeeded()
+  await expect(cancel).toBeInViewport()
+  await expect(dialog.getByRole('button', { name: 'Close settings' })).toBeInViewport()
+  await cancel.click()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+})
