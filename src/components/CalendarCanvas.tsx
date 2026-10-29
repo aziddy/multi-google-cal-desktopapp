@@ -16,6 +16,12 @@ import {
 } from '../domain/calendar'
 import type { Calendar, CalendarEvent, CalendarView, EventInput } from '../domain/types'
 import { eventTime } from '../domain/display'
+import {
+  isSpanningEvent,
+  layoutEventSpans,
+  limitEventSpans,
+  type EventSpan,
+} from '../domain/eventSpans'
 
 interface Props {
   view: CalendarView
@@ -34,6 +40,8 @@ interface ViewProps extends Props {
 }
 
 const HOUR_HEIGHT = 64
+const MONTH_HEADER_HEIGHT = 34
+const MONTH_EVENT_HEIGHT = 24
 const weekday = (date: string, long = false) =>
   formatDate(date, { weekday: long ? 'long' : 'short' })
 const dateNumber = (date: string) => Temporal.PlainDate.from(date).day
@@ -43,6 +51,26 @@ function colorFor(event: CalendarEvent, calendars: Calendar[]) {
     calendars.find(
       (calendar) => calendar.id === event.calendarId && calendar.accountId === event.accountId,
     )?.color ?? '#1a73e8'
+  )
+}
+
+function spanClasses(span: EventSpan) {
+  return `event-span ${span.continuesBefore ? 'continues-before' : ''} ${span.continuesAfter ? 'continues-after' : ''}`
+}
+
+function spanLabel(event: CalendarEvent, timeZone: string) {
+  if (event.allDay) return event.title
+  const options: Intl.DateTimeFormatOptions = { dateStyle: 'full', timeStyle: 'short' }
+  return `${event.title}, ${formatDate(event.start, options, timeZone)} to ${formatDate(event.end, options, timeZone)}`
+}
+
+function SpanContent({ event, timeZone }: { event: CalendarEvent; timeZone: string }) {
+  return (
+    <>
+      {!event.allDay && <span className="span-event-time">{eventTime(event, timeZone)}</span>}
+      <strong>{event.title}</strong>
+      {!event.allDay && <span className="span-event-time">{eventTime(event, timeZone, true)}</span>}
+    </>
   )
 }
 
@@ -192,23 +220,12 @@ function TimeView({
     window.addEventListener('keydown', escape)
   }
 
-  const allDay = [...new Set([...dailyEvents.values()].flat())].filter((event) => event.allDay)
-  const allDayRows: { event: CalendarEvent; start: number; end: number; row: number }[] = []
-  const occupied: number[][] = []
-  allDay
-    .sort((a, b) => a.start.localeCompare(b.start) || b.end.localeCompare(a.end))
-    .forEach((event) => {
-      const start = days.findIndex((day) => event.start <= day && event.end > day)
-      let end = start
-      while (end + 1 < days.length && event.end > days[end + 1]) end++
-      let row = 0
-      while (occupied[row]?.some((day) => day >= start && day <= end)) row++
-      occupied[row] = [
-        ...(occupied[row] ?? []),
-        ...Array.from({ length: end - start + 1 }, (_, index) => start + index),
-      ]
-      allDayRows.push({ event, start, end, row })
-    })
+  const stripEvents =
+    view === 'day'
+      ? new Map([[startDate, (dailyEvents.get(startDate) ?? []).filter((event) => event.allDay)]])
+      : dailyEvents
+  const spanningRows = layoutEventSpans(days, stripEvents, timeZone)
+  const spanningRowCount = spanningRows.reduce((count, span) => Math.max(count, span.row + 1), 1)
 
   return (
     <section
@@ -234,7 +251,7 @@ function TimeView({
         style={
           {
             '--day-count': days.length,
-            '--all-day-rows': Math.max(1, occupied.length),
+            '--all-day-rows': spanningRowCount,
           } as CSSProperties
         }
       >
@@ -248,19 +265,21 @@ function TimeView({
             onClick={() => onCreate(day, 0, true)}
           />
         ))}
-        {allDayRows.map(({ event, start, end, row }) => (
+        {spanningRows.map((span) => (
           <button
-            key={event.id}
-            className="all-day-event"
+            key={span.key}
+            className={`all-day-event ${spanClasses(span)}`}
+            data-event-id={span.event.id}
             style={{
-              gridColumn: `${start + 2} / ${end + 3}`,
-              top: row * 24 + 4,
-              background: colorFor(event, calendars),
+              gridColumn: `${span.start + 2} / ${span.end + 2}`,
+              top: span.row * 24 + 4,
+              background: colorFor(span.event, calendars),
             }}
-            onClick={() => onSelect(event)}
-            title={event.title}
+            onClick={() => onSelect(span.event)}
+            title={spanLabel(span.event, timeZone)}
+            aria-label={spanLabel(span.event, timeZone)}
           >
-            {event.title}
+            <SpanContent event={span.event} timeZone={timeZone} />
           </button>
         ))}
       </div>
@@ -297,7 +316,13 @@ function TimeView({
                   />
                 ))}
               </div>
-              {timedSegments(dailyEvents.get(day) ?? [], day, timeZone).map((segment) => {
+              {timedSegments(
+                (dailyEvents.get(day) ?? []).filter(
+                  (event) => view === 'day' || !isSpanningEvent(event),
+                ),
+                day,
+                timeZone,
+              ).map((segment) => {
                 const { event, startMinute, endMinute, column, columns } = segment
                 const height = Math.max(22, ((endMinute - startMinute) / 60) * HOUR_HEIGHT - 2)
                 const original = Temporal.Instant.from(event.start).toZonedDateTimeISO(timeZone)
@@ -431,7 +456,12 @@ function MonthView({
   useEffect(() => {
     if (!gridRef.current) return
     const observer = new ResizeObserver(([entry]) =>
-      setCapacity(Math.max(1, Math.floor((entry.contentRect.height / 6 - 32) / 24))),
+      setCapacity(
+        Math.max(
+          1,
+          Math.floor((entry.contentRect.height / 6 - MONTH_HEADER_HEIGHT) / MONTH_EVENT_HEIGHT),
+        ),
+      ),
     )
     observer.observe(gridRef.current)
     return () => observer.disconnect()
@@ -446,57 +476,89 @@ function MonthView({
           <span key={day}>{weekday(day)}</span>
         ))}
       </div>
-      <div className="month-grid" ref={gridRef}>
-        {days.map((day) => {
-          const daily = dailyEvents.get(day) ?? []
-          const visibleCount = daily.length > capacity ? Math.max(0, capacity - 1) : capacity
+      <div
+        className="month-grid"
+        ref={gridRef}
+        style={
+          {
+            '--month-header-height': `${MONTH_HEADER_HEIGHT}px`,
+            '--month-event-height': `${MONTH_EVENT_HEIGHT}px`,
+          } as CSSProperties
+        }
+      >
+        {Array.from({ length: 6 }, (_, week) => {
+          const weekDays = days.slice(week * 7, week * 7 + 7)
+          const { visible, hiddenCounts } = limitEventSpans(
+            layoutEventSpans(weekDays, dailyEvents, timeZone, true),
+            capacity,
+            weekDays.length,
+          )
           return (
-            <div
-              key={day}
-              className={`month-day ${Temporal.PlainDate.from(day).month !== month ? 'outside-month' : ''}`}
-              onDoubleClick={(e) => {
-                if (e.target === e.currentTarget) onCreate(day, 540)
-              }}
-            >
-              <button
-                className={`month-day-number ${day === today ? 'is-today' : ''}`}
-                onClick={() => onOpenDate(day)}
-                aria-label={`View ${formatDate(day, { dateStyle: 'full' })}`}
-              >
-                {dateNumber(day) === 1
-                  ? formatDate(day, { month: 'short', day: 'numeric' })
-                  : dateNumber(day)}
-              </button>
-              <button
-                className="month-create"
-                aria-label={`Create event on ${day}`}
-                onClick={() => onCreate(day, 540)}
-              >
-                <Plus size={14} />
-              </button>
-              <div className="month-events">
-                {daily.slice(0, visibleCount).map((event) => (
+            <div className="month-week" key={weekDays[0]}>
+              {weekDays.map((day, column) => (
+                <div
+                  key={day}
+                  data-date={day}
+                  className={`month-day ${Temporal.PlainDate.from(day).month !== month ? 'outside-month' : ''}`}
+                  onDoubleClick={(e) => {
+                    if (e.target === e.currentTarget) onCreate(day, 540)
+                  }}
+                >
                   <button
-                    key={event.id}
-                    className={`month-event ${event.allDay ? 'is-all-day' : ''}`}
-                    style={event.allDay ? { background: colorFor(event, calendars) } : {}}
-                    onClick={() => onSelect(event)}
-                    title={event.title}
+                    className={`month-day-number ${day === today ? 'is-today' : ''}`}
+                    onClick={() => onOpenDate(day)}
+                    aria-label={`View ${formatDate(day, { dateStyle: 'full' })}`}
                   >
-                    {!event.allDay && (
+                    {dateNumber(day) === 1
+                      ? formatDate(day, { month: 'short', day: 'numeric' })
+                      : dateNumber(day)}
+                  </button>
+                  <button
+                    className="month-create"
+                    aria-label={`Create event on ${day}`}
+                    onClick={() => onCreate(day, 540)}
+                  >
+                    <Plus size={14} />
+                  </button>
+                  {hiddenCounts[column] > 0 && (
+                    <button
+                      className="more-events"
+                      style={{
+                        top: MONTH_HEADER_HEIGHT + (capacity - 1) * MONTH_EVENT_HEIGHT + 1,
+                      }}
+                      onClick={() => onOpenDate(day)}
+                    >
+                      {hiddenCounts[column]} more
+                    </button>
+                  )}
+                </div>
+              ))}
+              <div className="month-week-events">
+                {visible.map((span) => (
+                  <button
+                    key={span.key}
+                    data-event-id={span.event.id}
+                    className={`month-event ${span.spanning ? `is-spanning ${spanClasses(span)}` : ''}`}
+                    style={{
+                      gridColumn: `${span.start + 1} / ${span.end + 1}`,
+                      gridRow: span.row + 1,
+                      ...(span.spanning && { background: colorFor(span.event, calendars) }),
+                    }}
+                    onClick={() => onSelect(span.event)}
+                    title={span.spanning ? spanLabel(span.event, timeZone) : span.event.title}
+                    aria-label={span.spanning ? spanLabel(span.event, timeZone) : undefined}
+                  >
+                    {span.spanning ? (
+                      <SpanContent event={span.event} timeZone={timeZone} />
+                    ) : (
                       <>
-                        <i style={{ background: colorFor(event, calendars) }} />
-                        <span className="month-event-time">{eventTime(event, timeZone)}</span>
+                        <i style={{ background: colorFor(span.event, calendars) }} />
+                        <span className="month-event-time">{eventTime(span.event, timeZone)}</span>
+                        <strong>{span.event.title}</strong>
                       </>
                     )}
-                    <strong>{event.title}</strong>
                   </button>
                 ))}
-                {daily.length > visibleCount && (
-                  <button className="more-events" onClick={() => onOpenDate(day)}>
-                    {daily.length - visibleCount} more
-                  </button>
-                )}
               </div>
             </div>
           )

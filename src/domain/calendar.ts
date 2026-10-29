@@ -88,8 +88,11 @@ export function formatDate(
   )
 }
 
-/** Dates touched by an event; both date-only and timed end boundaries are exclusive. */
-export function eventDates(event: CalendarEvent, timeZone = DEFAULT_TIME_ZONE): string[] {
+/** Date boundaries without expanding long-running events; the end is exclusive. */
+export function eventDateRange(
+  event: CalendarEvent,
+  timeZone = DEFAULT_TIME_ZONE,
+): DateRange | undefined {
   let start: Temporal.PlainDate
   let exclusiveEnd: Temporal.PlainDate
   if (event.allDay) {
@@ -98,7 +101,7 @@ export function eventDates(event: CalendarEvent, timeZone = DEFAULT_TIME_ZONE): 
   } else {
     const startInstant = Temporal.Instant.from(event.start)
     const endInstant = Temporal.Instant.from(event.end)
-    if (Temporal.Instant.compare(endInstant, startInstant) <= 0) return []
+    if (Temporal.Instant.compare(endInstant, startInstant) <= 0) return undefined
     start = startInstant.toZonedDateTimeISO(timeZone).toPlainDate()
     // Subtracting a nanosecond keeps a midnight end out of the following day.
     exclusiveEnd = endInstant
@@ -107,10 +110,18 @@ export function eventDates(event: CalendarEvent, timeZone = DEFAULT_TIME_ZONE): 
       .toPlainDate()
       .add({ days: 1 })
   }
+  if (Temporal.PlainDate.compare(start, exclusiveEnd) >= 0) return undefined
+  return { startDate: start.toString(), endDate: exclusiveEnd.toString(), timeZone }
+}
+
+/** Dates touched by an event; both date-only and timed end boundaries are exclusive. */
+export function eventDates(event: CalendarEvent, timeZone = DEFAULT_TIME_ZONE): string[] {
+  const range = eventDateRange(event, timeZone)
+  if (!range) return []
   const dates: string[] = []
   for (
-    let date = start;
-    Temporal.PlainDate.compare(date, exclusiveEnd) < 0;
+    let date = Temporal.PlainDate.from(range.startDate);
+    date.toString() < range.endDate;
     date = date.add({ days: 1 })
   ) {
     dates.push(date.toString())

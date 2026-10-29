@@ -747,6 +747,33 @@ textarea::placeholder {
 .all-day-event:hover {
   filter: brightness(0.94);
 }
+.event-span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.event-span > strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.span-event-time {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.event-span.continues-before {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: 0;
+}
+.event-span.continues-after {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: 0;
+}
 .zone-label {
   grid-column: 1;
   grid-row: 1;
@@ -927,9 +954,14 @@ textarea::placeholder {
 }
 .month-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(6, minmax(0, 1fr));
   flex: 1;
+  min-height: 0;
+}
+.month-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  position: relative;
   min-height: 0;
 }
 .month-day {
@@ -981,22 +1013,35 @@ textarea::placeholder {
 .month-create:focus-visible {
   opacity: 1;
 }
+.month-week-events {
+  position: absolute;
+  inset: var(--month-header-height) 0 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: var(--month-event-height);
+  overflow: hidden;
+  pointer-events: none;
+}
 .month-event {
-  height: 23px;
+  height: 22px;
   display: flex;
   align-items: center;
   gap: 5px;
   padding: 0 5px;
   margin: 1px 3px;
-  width: calc(100% - 6px);
+  width: auto;
   font-size: 11px;
   min-width: 0;
   border-radius: 4px;
   text-align: left;
   background: transparent;
+  pointer-events: auto;
 }
 .month-event:hover {
   background: var(--hover);
+}
+.month-event:focus-visible {
+  outline-offset: -2px;
 }
 .month-event > i {
   width: 7px;
@@ -1014,16 +1059,17 @@ textarea::placeholder {
   overflow: hidden;
   font-weight: 500;
 }
-.month-event.is-all-day {
+.month-event.is-spanning {
   color: white;
 }
-.month-event.is-all-day:hover {
+.month-event.is-spanning:hover {
   filter: brightness(0.95);
 }
 .more-events {
+  position: absolute;
+  left: 8px;
   font-size: 10px;
   font-weight: 500;
-  margin-left: 8px;
   height: 21px;
   border-radius: 4px;
   padding: 0 8px;

@@ -60,6 +60,7 @@ Open `http://127.0.0.1:1420`. Browser preview uses local demo calendars and brow
 - Requests are limited to four globally and two per account, with coalescing and backoff. One account's failure does not clear another account's data. The status banner distinguishes missing coverage and failed refreshes from an empty calendar.
 - Search covers **downloaded dates** across visible calendars. It does not query all of Google Calendar. Cached events remain available offline; writes require a connection and are never queued for automatic offline replay.
 - Names, calendar colors, time zones, and permissions come from Google. Calendar visibility is an app-local preference. All-day dates keep their original date boundaries; timed view boundaries use the selected display zone.
+- Month, Week, and 7 days show continuous bars for all-day events and timed events lasting more than 24 elapsed hours. Month bars wrap at week boundaries. In Week and 7 days, these longer timed events appear above the hourly grid; shorter overnight events and events lasting exactly 24 hours stay in the grid. Timed bars show their start/end times and open event details for editing. Day and Schedule keep their usual event layouts.
 
 ### Keyboard shortcuts
 
